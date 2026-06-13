@@ -1,0 +1,17 @@
+{
+  "campaignName": "Curse of Strahd",
+  "characters": {
+    "111111111111111111": {
+      "name": "Aelarra Moonwhisper",
+      "portrait": "aelarra.png"
+    },
+    "222222222222222222": {
+      "name": "Thorin Brewbeard",
+      "portrait": "thorin.png"
+    },
+    "333333333333333333": {
+      "name": "Sister Vael",
+      "portrait": "vael.png"
+    }
+  }
+}

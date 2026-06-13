@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "D&D Voice Overlay for Roll20",
+  "version": "1.2.0",
+  "description": "Character portraits light up visual-novel style over Roll20 when a player speaks in Discord voice. No webcams, no setup for players.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["https://app.roll20.net/*"],
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "D&D Voice Overlay",
+    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "commands": {
+    "toggle-pause": {
+      "suggested_key": { "default": "Ctrl+Shift+P", "mac": "Command+Shift+P" },
+      "description": "Pause / resume the overlay (for out-of-character talk)"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://app.roll20.net/*"],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

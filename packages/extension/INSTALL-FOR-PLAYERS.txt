@@ -1,0 +1,24 @@
+D&D Voice Overlay - install (takes ~1 minute)
+=============================================
+
+You got a relay URL from your host (looks like http://... or https://...).
+Keep it handy.
+
+FIREFOX
+1. Unzip this folder somewhere you'll keep it (e.g. Documents).
+2. Open:  about:debugging#/runtime/this-firefox
+3. Click "Load Temporary Add-on..." and pick the file "manifest.json" in this folder.
+4. Click the puzzle-piece icon in the toolbar -> "D&D Voice Overlay".
+   Paste the relay URL, click "Test" (should say OK), then "Save".
+5. Open your Roll20 game tab. Done - portraits light up when people talk.
+   NOTE: Firefox forgets temporary add-ons when you restart it, so redo
+   steps 2-3 each time you start a session (your relay URL is remembered).
+
+CHROME / EDGE
+1. Unzip this folder.
+2. Open:  chrome://extensions   (or edge://extensions)
+3. Turn on "Developer mode" (top-right), click "Load unpacked", pick this folder.
+4. Click the extension icon, paste the relay URL, Test, Save.
+5. Open Roll20.
+
+Pause your own overlay anytime with Ctrl+Shift+P (for out-of-character talk).

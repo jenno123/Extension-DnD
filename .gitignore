@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+# NOTE: config/campaign.json and config/portraits/*.png ARE committed on purpose
+# so the hosted relay (Render) can serve them. Keep real secrets out of them.

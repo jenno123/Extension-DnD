@@ -1,0 +1,16 @@
+# Render Blueprint - deploys the relay as a free web service.
+# Render auto-detects this file when you create a "Blueprint" from your repo.
+services:
+  - type: web
+    name: dnd-overlay-relay
+    runtime: node
+    plan: free
+    rootDir: packages/relay
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      # Render injects PORT automatically; the relay already reads process.env.PORT.
+      - key: CONFIG_DIR
+        value: ../../config        # -> repo/config (campaign.json + portraits/)
+      - key: RELAY_TOKEN
+        sync: false                # set this secret in the Render dashboard

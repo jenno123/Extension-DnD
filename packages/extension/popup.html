@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { width: 280px; margin: 0; padding: 14px 16px;
+           font-family: "Segoe UI", system-ui, sans-serif; color: #1d1d1f; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    label { font-size: 12px; color: #555; display: block; margin-bottom: 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 7px 8px;
+            border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+    .row { display: flex; gap: 8px; margin-top: 10px; }
+    button { flex: 1; padding: 7px; border: 0; border-radius: 6px; cursor: pointer;
+             font-size: 13px; font-weight: 600; }
+    .save { background: #5865F2; color: #fff; }
+    .test { background: #eee; color: #333; }
+    #status { margin-top: 10px; font-size: 12px; min-height: 16px; }
+    .ok { color: #1e8e3e; } .bad { color: #c0392b; }
+    .hint { margin-top: 12px; font-size: 11px; color: #888; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <h1>D&amp;D Voice Overlay</h1>
+  <label for="url">Relay base URL</label>
+  <input id="url" type="text" placeholder="https://my-relay.example.com" />
+  <div class="row">
+    <button class="save" id="save">Save</button>
+    <button class="test" id="test">Test</button>
+  </div>
+  <div id="status"></div>
+  <button id="pause" style="width:100%;margin-top:10px;padding:8px;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;background:#3a3a3a;color:#fff;">Pause / Resume overlay</button>
+  <div class="hint" style="margin-top:6px;">Shortcut: <b>Ctrl+Shift+P</b> toggles the overlay on <b>your own screen only</b> (for out-of-character talk).</div>
+  <div class="hint">Ask your host for the relay address. After saving, reload
+    your Roll20 tab if the overlay doesn't appear.</div>
+  <script src="popup.js"></script>
+</body>
+</html>

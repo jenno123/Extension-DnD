@@ -1,0 +1,17 @@
+{
+  "campaignName": "Test",
+  "characters": {
+    "140888573543972864": {
+      "name": "Medvind",
+      "portrait": "medvind.png"
+    },
+    "222222222222222222": {
+      "name": "Thorin Brewbeard",
+      "portrait": "thorin.png"
+    },
+    "333333333333333333": {
+      "name": "Sister Vael",
+      "portrait": "vael.png"
+    }
+  }
+}
