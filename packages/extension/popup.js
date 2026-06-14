@@ -1,5 +1,5 @@
 const STORAGE_KEY = "relayBaseUrl";
-const DEFAULT_RELAY_URL = "https://CHANGE-ME-your-relay.example.com";
+const DEFAULT_RELAY_URL = "https://extension-dnd.onrender.com";
 const urlInput = document.getElementById("url");
 const statusEl = document.getElementById("status");
 

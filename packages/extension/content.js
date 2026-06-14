@@ -10,7 +10,7 @@
 (() => {
   const STORAGE_KEY = "relayBaseUrl";
   // Pre-configured relay so players don't have to type anything.
-  const DEFAULT_RELAY_URL = "https://CHANGE-ME-your-relay.example.com";
+  const DEFAULT_RELAY_URL = "https://extension-dnd.onrender.com";
   const SLOTS = ["slot-left", "slot-right", "slot-left-2", "slot-right-2"];
   const slotOccupant = new Array(SLOTS.length).fill(null);
   const HIDE_DELAY_MS = 340;
