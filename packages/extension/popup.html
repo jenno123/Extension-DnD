@@ -21,7 +21,9 @@
 </head>
 <body>
   <h1>D&amp;D Voice Overlay</h1>
-  <label for="url">Relay base URL</label>
+  <label for="code">Campaign code</label>
+  <input id="code" type="text" placeholder="e.g. RAVEN7" style="text-transform:uppercase" />
+  <label for="url" style="margin-top:10px;">Relay base URL (advanced)</label>
   <input id="url" type="text" placeholder="https://my-relay.example.com" />
   <div class="row">
     <button class="save" id="save">Save</button>
@@ -30,8 +32,8 @@
   <div id="status"></div>
   <button id="pause" style="width:100%;margin-top:10px;padding:8px;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;background:#3a3a3a;color:#fff;">Pause / Resume overlay</button>
   <div class="hint" style="margin-top:6px;">Shortcut: <b>Ctrl+Shift+P</b> toggles the overlay on <b>your own screen only</b> (for out-of-character talk).</div>
-  <div class="hint">Ask your host for the relay address. After saving, reload
-    your Roll20 tab if the overlay doesn't appear.</div>
+  <div class="hint">Ask your host for the <b>campaign code</b>. The relay URL is
+    pre-filled. After saving, reload your Roll20 tab if the overlay doesn't appear.</div>
   <script src="popup.js"></script>
 </body>
 </html>

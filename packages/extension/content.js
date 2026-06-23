@@ -9,6 +9,7 @@
  */
 (() => {
   const STORAGE_KEY = "relayBaseUrl";
+  const ROOM_KEY = "campaignCode";
   // Pre-configured relay so players don't have to type anything.
   const DEFAULT_RELAY_URL = "https://extension-dnd.onrender.com";
   const SLOTS = ["slot-left", "slot-right", "slot-left-2", "slot-right-2"];
@@ -21,6 +22,7 @@
   let rootEl = null, statusEl = null, pausedBanner = null;
   let teardown = false;
   let paused = false;
+  let room = "DEFAULT";
 
   const log = (...a) => console.log("[dnd-overlay]", ...a);
 
@@ -30,7 +32,7 @@
     if (!/^https?:\/\//i.test(base)) base = "http://" + base;
     return base;
   }
-  const toWsUrl = (b) => b.replace(/^http/i, "ws") + "/?role=display";
+  const toWsUrl = (b) => b.replace(/^http/i, "ws") + "/?role=display&room=" + encodeURIComponent(room);
 
   function ensureRoot() {
     if (rootEl && document.documentElement.contains(rootEl)) return;
@@ -62,7 +64,7 @@
       wrap.dataset.userid = userId;
       const img = document.createElement("img");
       img.alt = c.name || "";
-      img.src = `${base}/portraits/${encodeURIComponent(c.portrait)}`;
+      img.src = /^https?:\/\//i.test(c.portrait) ? c.portrait : `${base}/portraits/${encodeURIComponent(c.portrait)}?room=${encodeURIComponent(room)}`;
       img.onerror = () => log("portrait failed to load:", c.portrait);
       const name = document.createElement("div");
       name.className = "dnd-nameplate";
@@ -136,7 +138,7 @@
   const setConnected = (ok) => statusEl && statusEl.classList.toggle("connected", ok);
 
   async function loadCampaign(base) {
-    const res = await fetch(`${base}/campaign.json`, { cache: "no-store" });
+    const res = await fetch(`${base}/campaign.json?room=${encodeURIComponent(room)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`campaign.json HTTP ${res.status}`);
     return res.json();
   }
@@ -195,12 +197,16 @@
     if (msg && msg.type === "toggle-pause") requestTogglePause();
   });
 
-  chrome.storage.local.get(STORAGE_KEY, (data) => start(data[STORAGE_KEY] || DEFAULT_RELAY_URL));
+  chrome.storage.local.get([STORAGE_KEY, ROOM_KEY], (data) => {
+    room = (data[ROOM_KEY] || "DEFAULT").toUpperCase();
+    start(data[STORAGE_KEY] || DEFAULT_RELAY_URL);
+  });
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && changes[STORAGE_KEY]) {
-      log("relay URL changed, restarting overlay");
-      stop();
-      start(changes[STORAGE_KEY].newValue);
+    if (area !== "local") return;
+    if (changes[ROOM_KEY]) room = (changes[ROOM_KEY].newValue || "DEFAULT").toUpperCase();
+    if (changes[STORAGE_KEY] || changes[ROOM_KEY]) {
+      log("settings changed, restarting overlay");
+      chrome.storage.local.get(STORAGE_KEY, (d) => { stop(); start(d[STORAGE_KEY] || DEFAULT_RELAY_URL); });
     }
   });
 })();
