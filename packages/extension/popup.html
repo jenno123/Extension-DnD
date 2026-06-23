@@ -1,45 +1,46 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <style>
-    body { width: 280px; margin: 0; padding: 14px 16px;
-           font-family: "Segoe UI", system-ui, sans-serif; color: #1d1d1f; }
-    h1 { font-size: 15px; margin: 0 0 10px; }
-    label { font-size: 12px; color: #555; display: block; margin-bottom: 4px; }
-    input { width: 100%; box-sizing: border-box; padding: 7px 8px;
-            border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
-    .row { display: flex; gap: 8px; margin-top: 10px; }
-    button { flex: 1; padding: 7px; border: 0; border-radius: 6px; cursor: pointer;
-             font-size: 13px; font-weight: 600; }
-    .save { background: #5865F2; color: #fff; }
-    .test { background: #eee; color: #333; }
-    #status { margin-top: 10px; font-size: 12px; min-height: 16px; }
-    .ok { color: #1e8e3e; } .bad { color: #c0392b; }
-    .hint { margin-top: 12px; font-size: 11px; color: #888; line-height: 1.4; }
-  </style>
-</head>
-<body>
-  <h1>D&amp;D Voice Overlay</h1>
-  <label for="code">Campaign code</label>
-  <input id="code" type="text" placeholder="e.g. RAVEN7" style="text-transform:uppercase" />
-  <label for="join" style="margin-top:10px;">Join password (only if your campaign has one)</label>
-  <input id="join" type="password" placeholder="leave blank if none" />
-  <label style="display:flex;align-items:center;gap:7px;margin-top:12px;cursor:pointer;font-size:13px;color:#1d1d1f;">
-    <input type="checkbox" id="dm" style="width:auto;" /> 👑 I'm the DM — show the control strip on Roll20
-  </label>
-  <label for="url" style="margin-top:10px;">Relay base URL (advanced)</label>
-  <input id="url" type="text" placeholder="https://my-relay.example.com" />
-  <div class="row">
-    <button class="save" id="save">Save</button>
-    <button class="test" id="test">Test</button>
-  </div>
-  <div id="status"></div>
-  <button id="manageBtn" style="width:100%;margin-top:10px;padding:8px;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;background:#5865F2;color:#fff;">Create / manage campaign &amp; characters</button>
-  <button id="pause" style="width:100%;margin-top:10px;padding:8px;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;background:#3a3a3a;color:#fff;">Pause / Resume overlay</button>
-  <div class="hint" style="margin-top:6px;">Shortcut: <b>Ctrl+Shift+P</b> toggles the overlay on <b>your own screen only</b> (for out-of-character talk).</div>
-  <div class="hint">Ask your host for the <b>campaign code</b>. The relay URL is
-    pre-filled. After saving, reload your Roll20 tab if the overlay doesn't appear.</div>
-  <script src="popup.js"></script>
-</body>
-</html>
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+ body{width:300px;margin:0;padding:14px 16px;font-family:"Segoe UI",system-ui,sans-serif;color:#1d1d1f}
+ h1{font-size:15px;margin:0 0 10px}
+ label{font-size:12px;color:#555;display:block;margin:10px 0 4px;font-weight:600}
+ input,select{width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccc;border-radius:7px;font-size:13px}
+ button{padding:8px;border:0;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700}
+ .primary{background:#5865F2;color:#fff;width:100%}.ghost{background:#eee;color:#333}.danger{background:#c0392b;color:#fff}
+ .row{display:flex;gap:8px;margin-top:10px}
+ .dm{display:flex;align-items:center;gap:7px;margin-top:12px;font-size:13px;cursor:pointer}.dm input{width:auto}
+ .card{border:1px solid #eee;border-radius:9px;padding:10px;margin-top:12px;background:#fafafa}
+ .mychar{display:flex;align-items:center;gap:10px}.mychar img{width:42px;height:54px;object-fit:cover;border-radius:7px;background:#eee}.mychar .nm{font-weight:700;font-size:13px;flex:1}
+ #status,.msg{margin-top:8px;font-size:12px;min-height:15px}.ok{color:#1e8e3e}.bad{color:#c0392b}
+ .hint{font-size:11px;color:#888;line-height:1.4;margin-top:6px}
+ img#pcPrev{max-width:90px;border-radius:7px;margin-top:6px;display:none}
+ details{margin-top:10px}summary{font-size:12px;color:#666;cursor:pointer}
+</style></head><body>
+ <h1>🎭 D&amp;D Voice Overlay</h1>
+
+ <label>Campaign code</label><input id="code" placeholder="RAVEN7" style="text-transform:uppercase">
+ <label>Join password (if your campaign has one)</label><input id="join" type="password" placeholder="leave blank if none">
+ <div class="row"><button class="primary" id="save">Save</button><button class="ghost" id="test" style="flex:0 0 72px">Test</button></div>
+ <div id="status"></div>
+
+ <label class="dm"><input type="checkbox" id="dm"> 👑 I'm the DM</label>
+
+ <div id="playerCard" class="card">
+   <div id="myCharBox"></div>
+   <label>Your character — name</label><input id="pcName" placeholder="e.g. Medvind">
+   <label>Portrait image (transparent PNG looks best)</label><input id="pcFile" type="file" accept="image/*">
+   <img id="pcPrev">
+   <button class="primary" id="pcSave" style="margin-top:10px">Save my character</button>
+   <div id="pcMsg" class="msg"></div>
+ </div>
+
+ <div id="dmCard" class="card" style="display:none">
+   <button class="primary" id="console">Open DM campaign console</button>
+   <div class="hint">Create your campaign and add / delete your NPCs in the console.</div>
+ </div>
+
+ <button class="ghost" id="pause" style="width:100%;margin-top:12px">⏸ Pause / Resume my overlay</button>
+ <div class="hint">Shortcut: <b>Ctrl+Shift+P</b> — pauses only your screen.</div>
+
+ <details><summary>Advanced</summary><label>Relay base URL</label><input id="url" placeholder="https://..."></details>
+ <script src="popup.js"></script>
+</body></html>

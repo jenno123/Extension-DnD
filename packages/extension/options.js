@@ -63,7 +63,9 @@ function refreshChars() {
         const img = document.createElement("img");
         img.src = /^https?:\/\//i.test(chars[id].portrait) ? chars[id].portrait : base + "/portraits/" + enc(chars[id].portrait) + "?room=" + enc(code);
         const nm = document.createElement("span"); nm.textContent = chars[id].name || id;
-        d.appendChild(img); d.appendChild(nm); box.appendChild(d);
+        const del = document.createElement("button"); del.className = "ghost"; del.textContent = "Delete"; del.style.cssText = "margin-top:6px;padding:5px 10px;font-size:11px";
+        del.onclick = () => deleteChar(id);
+        d.appendChild(img); d.appendChild(nm); d.appendChild(del); box.appendChild(d);
       });
     }).catch(() => { box.innerHTML = '<div class="hint bad">Could not load characters.</div>'; });
 }
@@ -81,5 +83,13 @@ $("addBtn").onclick = () => {
     .then(() => { setMsg(m, "✓ Saved.", true); $("nName").value = ""; $("nFile").value = ""; $("prev").style.display = "none"; refreshChars(); })
     .catch((e) => setMsg(m, "Failed: " + e.message, false));
 };
+
+function deleteChar(id){
+  if(!confirm("Delete this character permanently?")) return;
+  fetch(base + "/admin/delete?room=" + enc(code) + "&id=" + enc(id) + (joinPw ? "&join=" + enc(joinPw) : ""), { method: "POST" })
+    .then((r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t); }))
+    .then(() => refreshChars())
+    .catch((e) => alert("Delete failed: " + e.message));
+}
 
 load();

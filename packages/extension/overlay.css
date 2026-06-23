@@ -160,3 +160,6 @@
   border: 1px solid rgba(228,196,120,0.4); background: #251c3c; color: #f4ecd2; font-size: 16px;
 }
 #dnd-dm-strip.paused .dnd-dm-pause { background: #c0392b; color: #fff; border-color: #c0392b; }
+
+#dnd-dm-strip .dnd-player-name { color: #f4ecd2; font-weight: 800; font-size: 14px; padding: 0 6px; white-space: nowrap; }
+#dnd-dm-strip .dnd-player-name.muted { color: #a99fc4; font-weight: 600; font-size: 12px; }

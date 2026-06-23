@@ -108,6 +108,12 @@ async function sbUpload(room: string, id: string, name: string, contentType: str
   if (!row.ok) throw new Error(`db ${row.status}: ${await row.text()}`);
   return publicUrl;
 }
+async function sbDelete(room: string, id: string): Promise<void> {
+  const key = `${encodeURIComponent(room)}/${encodeURIComponent(id)}`;
+  await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${key}`, { method: "DELETE", headers: sbHeaders }).catch(() => {});
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/characters?room=eq.${encodeURIComponent(room)}&char_id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: sbHeaders });
+  if (!r.ok) throw new Error(`delete ${r.status}: ${await r.text()}`);
+}
 async function sbCreateRoom(name: string, joinHash: string | null): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = genRoomCode();
@@ -196,6 +202,19 @@ const server = http.createServer(async (req, res) => {
       await sbUpload(room, id, name, type, bytes, kind);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
       return res.end(JSON.stringify({ ok: true, id }));
+    }
+
+    if (url.pathname === "/admin/delete" && req.method === "POST") {
+      if (!supabaseOn) { res.writeHead(503, CORS); return res.end("not configured"); }
+      const room = roomOf(url);
+      const camp = await sbGetCampaign(room);
+      if (!camp.exists) { res.writeHead(404, CORS); return res.end("unknown campaign code"); }
+      if (camp.joinHash && sha256(url.searchParams.get("join") ?? "") !== camp.joinHash) { res.writeHead(401, CORS); return res.end("join password required"); }
+      const id = (url.searchParams.get("id") ?? "").trim();
+      if (!id) { res.writeHead(400, CORS); return res.end("id required"); }
+      await sbDelete(room, id);
+      res.writeHead(200, { "Content-Type": "application/json", ...CORS });
+      return res.end(JSON.stringify({ ok: true }));
     }
 
     res.writeHead(404, CORS); res.end("not found");

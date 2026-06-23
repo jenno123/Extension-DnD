@@ -24,8 +24,8 @@
   let paused = false;
   let room = "DEFAULT";
   // ---- DM mode state ----
-  const DM_KEY = "dmMode", JOIN_KEY = "joinPw", SENS_KEY = "dmSens", HOLD_KEY = "dmHold";
-  let dmMode = false, joinPw = "", dmSens = 6, dmHold = 1200;
+  const DM_KEY = "dmMode", JOIN_KEY = "joinPw", SENS_KEY = "dmSens", HOLD_KEY = "dmHold", MYCHAR_KEY = "myCharacterId";
+  let dmMode = false, joinPw = "", dmSens = 6, dmHold = 1200, myChar = "";
   let campaignChars = {}, relayBase = "";
   let strip = null, repWs = null, repAc = null, repSp = null, repStream = null;
   let repRunning = false, repSpeaking = false, repLastLoud = 0, activeId = "", dmIds = [];
@@ -264,12 +264,17 @@
       });
       strip.appendChild(thumbs);
     } else {
-      const sel = document.createElement("select");
-      sel.className = "dnd-player-sel";
-      const ph = document.createElement("option"); ph.value = ""; ph.textContent = dmIds.length ? "Choose your character" : "(no characters yet)"; sel.appendChild(ph);
-      dmIds.forEach((id) => { const o = document.createElement("option"); o.value = id; o.textContent = campaignChars[id].name || id; sel.appendChild(o); });
-      sel.onchange = () => setActive(sel.value);
-      strip.appendChild(sel);
+      const lbl = document.createElement("div");
+      lbl.className = "dnd-player-name";
+      if (myChar && campaignChars[myChar]) {
+        lbl.textContent = campaignChars[myChar].name || myChar;
+        activeId = myChar;
+      } else {
+        lbl.textContent = "Add your character in the extension popup";
+        lbl.classList.add("muted");
+        activeId = "";
+      }
+      strip.appendChild(lbl);
     }
 
     const sens = document.createElement("input");
@@ -344,12 +349,13 @@
     if (msg && msg.type === "toggle-pause") requestTogglePause();
   });
 
-  chrome.storage.local.get([STORAGE_KEY, ROOM_KEY, DM_KEY, JOIN_KEY, SENS_KEY, HOLD_KEY], (data) => {
+  chrome.storage.local.get([STORAGE_KEY, ROOM_KEY, DM_KEY, JOIN_KEY, SENS_KEY, HOLD_KEY, MYCHAR_KEY], (data) => {
     room = (data[ROOM_KEY] || "DEFAULT").toUpperCase();
     dmMode = !!data[DM_KEY];
     joinPw = data[JOIN_KEY] || "";
     dmSens = data[SENS_KEY] || 6;
     dmHold = data[HOLD_KEY] || 1200;
+    myChar = data[MYCHAR_KEY] || "";
     start(data[STORAGE_KEY] || DEFAULT_RELAY_URL);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -358,7 +364,8 @@
     if (changes[DM_KEY]) dmMode = !!changes[DM_KEY].newValue;
     if (changes[JOIN_KEY]) joinPw = changes[JOIN_KEY].newValue || "";
     if (changes[SENS_KEY]) dmSens = changes[SENS_KEY].newValue || 6;
-    if (changes[STORAGE_KEY] || changes[ROOM_KEY] || changes[DM_KEY] || changes[JOIN_KEY]) {
+    if (changes[MYCHAR_KEY]) myChar = changes[MYCHAR_KEY].newValue || "";
+    if (changes[STORAGE_KEY] || changes[ROOM_KEY] || changes[DM_KEY] || changes[JOIN_KEY] || changes[MYCHAR_KEY]) {
       log("settings changed, restarting overlay");
       chrome.storage.local.get(STORAGE_KEY, (d) => { stop(); start(d[STORAGE_KEY] || DEFAULT_RELAY_URL); });
     }
