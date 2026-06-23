@@ -86,12 +86,12 @@ async function sbGetCampaign(room: string): Promise<Campaign> {
   if (!rows.length) return { exists: false };
   return { exists: true, name: rows[0].name, joinHash: rows[0].join_hash ?? null, dmHash: rows[0].dm_key ?? null };
 }
-async function sbListCharacters(room: string): Promise<Array<{ char_id: string; name: string; portrait_url: string }>> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/characters?room=eq.${encodeURIComponent(room)}&select=char_id,name,portrait_url&order=name`, { headers: sbHeaders });
+async function sbListCharacters(room: string): Promise<Array<{ char_id: string; name: string; portrait_url: string; kind: string }>> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/characters?room=eq.${encodeURIComponent(room)}&select=char_id,name,portrait_url,kind&order=name`, { headers: sbHeaders });
   if (!r.ok) throw new Error(`list ${r.status}`);
   return (await r.json()) as any;
 }
-async function sbUpload(room: string, id: string, name: string, contentType: string, bytes: Buffer): Promise<string> {
+async function sbUpload(room: string, id: string, name: string, contentType: string, bytes: Buffer, kind: string): Promise<string> {
   const key = `${encodeURIComponent(room)}/${encodeURIComponent(id)}`;
   const put = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${key}`, {
     method: "POST",
@@ -103,7 +103,7 @@ async function sbUpload(room: string, id: string, name: string, contentType: str
   const row = await fetch(`${SUPABASE_URL}/rest/v1/characters`, {
     method: "POST",
     headers: { ...sbHeaders, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ room, char_id: id, name, portrait_url: publicUrl }),
+    body: JSON.stringify({ room, char_id: id, name, portrait_url: publicUrl, kind }),
   });
   if (!row.ok) throw new Error(`db ${row.status}: ${await row.text()}`);
   return publicUrl;
@@ -172,7 +172,7 @@ const server = http.createServer(async (req, res) => {
       let payload: any = { campaignName: room, characters: {} };
       if (supabaseOn) {
         const rows = await sbListCharacters(room);
-        for (const row of rows) payload.characters[row.char_id] = { name: row.name, portrait: row.portrait_url };
+        for (const row of rows) payload.characters[row.char_id] = { name: row.name, portrait: row.portrait_url, kind: row.kind || "pc" };
       }
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
       return res.end(JSON.stringify(payload));
@@ -192,7 +192,8 @@ const server = http.createServer(async (req, res) => {
       if (!id) { res.writeHead(400, CORS); return res.end("invalid name"); }
       const bytes = await readBody(req);
       if (!bytes.length) { res.writeHead(400, CORS); return res.end("no image"); }
-      await sbUpload(room, id, name, type, bytes);
+      const kind = url.searchParams.get("kind") === "npc" ? "npc" : "pc";
+      await sbUpload(room, id, name, type, bytes, kind);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
       return res.end(JSON.stringify({ ok: true, id }));
     }

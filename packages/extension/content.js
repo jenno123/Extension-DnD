@@ -23,6 +23,12 @@
   let teardown = false;
   let paused = false;
   let room = "DEFAULT";
+  // ---- DM mode state ----
+  const DM_KEY = "dmMode", JOIN_KEY = "joinPw", SENS_KEY = "dmSens", HOLD_KEY = "dmHold";
+  let dmMode = false, joinPw = "", dmSens = 6, dmHold = 1200;
+  let campaignChars = {}, relayBase = "";
+  let strip = null, repWs = null, repAc = null, repSp = null, repStream = null;
+  let repRunning = false, repSpeaking = false, repLastLoud = 0, activeId = "", dmIds = [];
 
   const log = (...a) => console.log("[dnd-overlay]", ...a);
 
@@ -126,6 +132,7 @@
   function applyPaused(p) {
     paused = !!p;
     if (pausedBanner) pausedBanner.classList.toggle("show", paused);
+    if (strip) strip.classList.toggle("paused", paused);
     if (paused) resetAll();   // hide all art immediately
     log(paused ? "overlay paused" : "overlay resumed");
   }
@@ -174,8 +181,11 @@
     if (!base) { log("no relay URL set. Open the extension popup and enter it."); return; }
     try {
       const campaign = await loadCampaign(base);
+      campaignChars = (campaign && campaign.characters) || {};
+      relayBase = base;
       buildPortraits(base, campaign);
       connectSocket(base);
+      initStrip();
     } catch (err) {
       log("startup failed:", err.message, "- retrying in 5s");
       setTimeout(() => start(rawBase), 5000);
@@ -184,6 +194,7 @@
 
   function stop() {
     teardown = true;
+    teardownDm();
     if (socket) { try { socket.close(); } catch (_) {} socket = null; }
     clearOverlay();
     if (rootEl) rootEl.remove();
@@ -192,19 +203,162 @@
     rootEl = statusEl = pausedBanner = null;
   }
 
-  // Pause toggle from the keyboard command / popup (via background.js).
+  // ===== Bottom control strip (players: pick char + mic + pause; DM: board) =====
+  function portraitUrl(c){ return /^https?:\/\//i.test(c.portrait) ? c.portrait : `${relayBase}/portraits/${encodeURIComponent(c.portrait)}?room=${encodeURIComponent(room)}`; }
+  function repWsUrl() {
+    return relayBase.replace(/^http/i, "ws") + "/?role=reporter&room=" + encodeURIComponent(room) +
+      (joinPw ? "&join=" + encodeURIComponent(joinPw) : "");
+  }
+  function reporterSend(id, on) {
+    if (repWs && repWs.readyState === 1 && id) repWs.send(JSON.stringify({ type: "speaking", userId: id, speaking: on }));
+  }
+  function setRepSpeaking(on) {
+    if (on === repSpeaking) return;
+    repSpeaking = on;
+    reporterSend(activeId, on);
+    if (strip) strip.classList.toggle("speaking", on);
+  }
+  function highlightStrip() {
+    if (!strip) return;
+    strip.querySelectorAll(".dnd-dm-thumb").forEach((t) => t.classList.toggle("active", t.dataset.id === activeId));
+    const sel = strip.querySelector(".dnd-player-sel");
+    if (sel && sel.value !== activeId) sel.value = activeId;
+  }
+  function setActive(id) {
+    if (!id) { activeId = ""; highlightStrip(); return; }
+    if (repRunning) {
+      if (activeId && activeId !== id) reporterSend(activeId, false);
+      activeId = id;
+      reporterSend(id, true);
+      repSpeaking = true; repLastLoud = Date.now();
+      if (strip) strip.classList.add("speaking");
+    } else {
+      activeId = id;
+    }
+    highlightStrip();
+  }
+  function mkBtn(cls, txt, title, onclick) { const b = document.createElement("button"); b.className = cls; b.textContent = txt; b.title = title; b.onclick = onclick; return b; }
+
+  function buildStrip() {
+    teardownStrip();
+    const allIds = Object.keys(campaignChars);
+    dmIds = dmMode
+      ? allIds.filter((id) => (campaignChars[id].kind || "pc") === "npc")
+      : allIds.filter((id) => (campaignChars[id].kind || "pc") !== "npc");
+    strip = document.createElement("div");
+    strip.id = "dnd-dm-strip";
+
+    strip.appendChild(mkBtn("dnd-dm-mic", "🎤", "Start/stop your microphone", () => (repRunning ? stopMic() : startMic())));
+
+    if (dmMode) {
+      const thumbs = document.createElement("div");
+      thumbs.className = "dnd-dm-thumbs";
+      dmIds.forEach((id, i) => {
+        const c = campaignChars[id];
+        const t = document.createElement("div");
+        t.className = "dnd-dm-thumb"; t.dataset.id = id; t.title = c.name || id;
+        const img = document.createElement("img"); img.src = portraitUrl(c); t.appendChild(img);
+        if (i < 9) { const k = document.createElement("span"); k.className = "dnd-dm-kbd"; k.textContent = i + 1; t.appendChild(k); }
+        t.onclick = () => setActive(id);
+        thumbs.appendChild(t);
+      });
+      strip.appendChild(thumbs);
+    } else {
+      const sel = document.createElement("select");
+      sel.className = "dnd-player-sel";
+      const ph = document.createElement("option"); ph.value = ""; ph.textContent = dmIds.length ? "Choose your character" : "(no characters yet)"; sel.appendChild(ph);
+      dmIds.forEach((id) => { const o = document.createElement("option"); o.value = id; o.textContent = campaignChars[id].name || id; sel.appendChild(o); });
+      sel.onchange = () => setActive(sel.value);
+      strip.appendChild(sel);
+    }
+
+    const sens = document.createElement("input");
+    sens.type = "range"; sens.min = "1"; sens.max = "40"; sens.value = String(dmSens);
+    sens.className = "dnd-dm-sens"; sens.title = "Mic sensitivity";
+    sens.oninput = () => { dmSens = parseInt(sens.value, 10) || 6; chrome.storage.local.set({ [SENS_KEY]: dmSens }); };
+    strip.appendChild(sens);
+
+    strip.appendChild(mkBtn("dnd-dm-pause", "⏸", "Pause overlay on my screen (Ctrl+Shift+P)", () => requestTogglePause()));
+
+    strip.classList.toggle("paused", paused);
+    document.documentElement.appendChild(strip);
+    if (dmMode && dmIds.length) setActive(dmIds.indexOf(activeId) >= 0 ? activeId : dmIds[0]);
+  }
+  function teardownStrip() { if (strip) { strip.remove(); strip = null; } }
+
+  function connectReporter() {
+    repWs = new WebSocket(repWsUrl());
+    repWs.onclose = () => { if (repRunning) setTimeout(() => { if (repRunning) connectReporter(); }, 1500); };
+    repWs.onerror = () => {};
+  }
+  function onAudio(e) {
+    if (!repRunning) return;
+    const d = e.inputBuffer.getChannelData(0); let s = 0;
+    for (let i = 0; i < d.length; i++) s += d[i] * d[i];
+    const level = Math.min(1, Math.sqrt(s / d.length) * 4);
+    const thr = dmSens / 100, now = Date.now();
+    if (level > thr) { repLastLoud = now; if (!repSpeaking) setRepSpeaking(true); }
+    else if (repSpeaking && now - repLastLoud > dmHold) setRepSpeaking(false);
+  }
+  function startMic() {
+    if (!dmMode && !activeId) {
+      const sel = strip && strip.querySelector(".dnd-player-sel");
+      if (sel && sel.value) activeId = sel.value;
+      if (!activeId) { if (sel) sel.focus(); log("pick your character first"); return; }
+    }
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
+      .then((st) => {
+        repStream = st;
+        repAc = new (window.AudioContext || window.webkitAudioContext)();
+        const sn = repAc.createMediaStreamSource(st);
+        repSp = repAc.createScriptProcessor(2048, 1, 1);
+        repSp.onaudioprocess = onAudio;
+        sn.connect(repSp); repSp.connect(repAc.destination);
+        connectReporter();
+        repRunning = true; repLastLoud = Date.now();
+        if (strip) strip.classList.add("mic-on");
+        log("mic on");
+      }).catch((e) => log("mic denied:", e.message));
+  }
+  function stopMic() {
+    repRunning = false; setRepSpeaking(false);
+    if (repSp) { try { repSp.disconnect(); repSp.onaudioprocess = null; } catch (_) {} repSp = null; }
+    if (repStream) { repStream.getTracks().forEach((t) => t.stop()); repStream = null; }
+    if (repAc) { try { repAc.close(); } catch (_) {} repAc = null; }
+    if (repWs) { try { repWs.close(); } catch (_) {} repWs = null; }
+    if (strip) strip.classList.remove("mic-on");
+    log("mic off");
+  }
+  function initStrip() { buildStrip(); }
+  function teardownDm() { stopMic(); teardownStrip(); }
+
+  // hotkeys 1-9 (DM only, ignored while typing in a Roll20 field)
+  document.addEventListener("keydown", (e) => {
+    if (!dmMode || !strip) return;
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= 9 && dmIds[n - 1]) setActive(dmIds[n - 1]);
+  });  // Pause toggle from the keyboard command / popup (via background.js).
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === "toggle-pause") requestTogglePause();
   });
 
-  chrome.storage.local.get([STORAGE_KEY, ROOM_KEY], (data) => {
+  chrome.storage.local.get([STORAGE_KEY, ROOM_KEY, DM_KEY, JOIN_KEY, SENS_KEY, HOLD_KEY], (data) => {
     room = (data[ROOM_KEY] || "DEFAULT").toUpperCase();
+    dmMode = !!data[DM_KEY];
+    joinPw = data[JOIN_KEY] || "";
+    dmSens = data[SENS_KEY] || 6;
+    dmHold = data[HOLD_KEY] || 1200;
     start(data[STORAGE_KEY] || DEFAULT_RELAY_URL);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes[ROOM_KEY]) room = (changes[ROOM_KEY].newValue || "DEFAULT").toUpperCase();
-    if (changes[STORAGE_KEY] || changes[ROOM_KEY]) {
+    if (changes[DM_KEY]) dmMode = !!changes[DM_KEY].newValue;
+    if (changes[JOIN_KEY]) joinPw = changes[JOIN_KEY].newValue || "";
+    if (changes[SENS_KEY]) dmSens = changes[SENS_KEY].newValue || 6;
+    if (changes[STORAGE_KEY] || changes[ROOM_KEY] || changes[DM_KEY] || changes[JOIN_KEY]) {
       log("settings changed, restarting overlay");
       chrome.storage.local.get(STORAGE_KEY, (d) => { stop(); start(d[STORAGE_KEY] || DEFAULT_RELAY_URL); });
     }

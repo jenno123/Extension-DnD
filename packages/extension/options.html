@@ -1,0 +1,67 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D&D Voice Overlay — Manage</title>
+<style>
+ :root{--gold:#e4c478;--bg1:#13111c;--bg2:#1b1530;--card:#241c3a;--ink:#f4ecd2;--mut:#a99fc4;--line:rgba(228,196,120,.22)}
+ *{box-sizing:border-box}
+ body{font-family:"Trebuchet MS",system-ui,Segoe UI,sans-serif;color:var(--ink);margin:0;min-height:100vh;
+   background:radial-gradient(1200px 600px at 50% -10%,#2a2147 0%,var(--bg2) 40%,var(--bg1) 100%)}
+ .wrap{max-width:620px;margin:0 auto;padding:34px 20px 70px}
+ h1{font-size:24px;margin:0 0 4px}h2{font-size:16px;margin:0 0 10px;color:var(--gold)}
+ .sub{color:var(--mut);font-size:13px;margin:0 0 22px}
+ .card{border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:14px;padding:18px;margin-bottom:18px}
+ label{display:block;margin:12px 0 5px;font-size:12px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+ input,select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;background:#150f24;color:var(--ink)}
+ input[type=file]{padding:8px}
+ button{margin-top:14px;padding:12px 18px;border:0;border-radius:11px;font-weight:800;font-size:14px;cursor:pointer;
+   background:linear-gradient(180deg,#f0d291,#d8b15e);color:#231a06}
+ button.ghost{background:rgba(255,255,255,.07);color:var(--ink);border:1px solid var(--line)}
+ .row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+ .row>div{flex:1;min-width:160px}
+ .msg{margin-top:10px;font-size:13px;min-height:18px}.ok{color:#8ee6a0}.bad{color:#ff9a8f}
+ code{background:#0e0a1c;color:var(--gold);padding:2px 8px;border-radius:6px}
+ .chars{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:12px;margin-top:14px}
+ .ch{text-align:center}.ch img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:10px;background:var(--card);border:1px solid var(--line)}
+ .ch span{display:block;font-size:12px;margin-top:5px;color:var(--ink)}
+ img#prev{max-width:120px;border-radius:10px;margin-top:8px;display:none}
+ .hint{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.5}
+</style></head><body><div class="wrap">
+ <h1>🎭 Manage your campaign</h1>
+ <p class="sub">Create a campaign and add character portraits — all from the overlay. The web portal is optional.</p>
+
+ <div class="card">
+  <h2>1 · Create a campaign</h2>
+  <div class="row">
+   <div><label>Campaign name</label><input id="cName" placeholder="e.g. Curse of Strahd"></div>
+   <div><label>Join password (optional)</label><input id="cJoin" type="password" placeholder="leave blank for open"></div>
+  </div>
+  <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Server requires an admin password?</summary>
+   <input id="cAdmin" type="password" placeholder="admin password (usually not needed)" style="margin-top:8px"></details>
+  <button id="createBtn">Create campaign</button>
+  <div id="createMsg" class="msg"></div>
+ </div>
+
+ <div class="card">
+  <h2>2 · Active campaign</h2>
+  <div class="row">
+   <div><label>Campaign code</label><input id="code" placeholder="RAVEN7" style="text-transform:uppercase"></div>
+   <div><label>Join password (if any)</label><input id="join" type="password" placeholder="leave blank if none"></div>
+  </div>
+  <button id="saveBtn" class="ghost">Use this campaign</button>
+  <div id="saveMsg" class="msg"></div>
+  <div class="hint" id="shareInfo"></div>
+ </div>
+
+ <div class="card">
+  <h2>3 · Characters</h2>
+  <div id="chars" class="chars"></div>
+  <label>This character is</label>
+  <select id="nKind"><option value="pc">My player character (a player controls it)</option><option value="npc">An NPC (the DM controls it)</option></select>
+  <label>Name</label><input id="nName" placeholder="e.g. Medvind">
+  <label>Portrait image (transparent PNG looks best)</label><input id="nFile" type="file" accept="image/*">
+  <img id="prev">
+  <button id="addBtn">Save character</button>
+  <div id="addMsg" class="msg"></div>
+ </div>
+</div>
+<script src="options.js"></script></body></html>

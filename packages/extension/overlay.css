@@ -116,3 +116,47 @@
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* ===== DM control strip (interactive; drawn on Roll20) ===== */
+#dnd-dm-strip {
+  position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%);
+  z-index: 2147483647; pointer-events: auto;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; border-radius: 14px;
+  background: rgba(14, 10, 28, 0.92);
+  border: 1px solid rgba(228, 196, 120, 0.5);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+  font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+}
+#dnd-dm-strip .dnd-dm-mic {
+  width: 40px; height: 40px; border-radius: 10px; cursor: pointer;
+  border: 1px solid rgba(228, 196, 120, 0.5); background: #251c3c; color: #f4ecd2;
+  font-size: 18px; line-height: 1; flex: 0 0 auto;
+}
+#dnd-dm-strip.mic-on .dnd-dm-mic { background: linear-gradient(180deg,#f0d291,#d8b15e); color:#231a06; border-color:#f0d291; }
+#dnd-dm-strip.speaking .dnd-dm-mic { box-shadow: 0 0 0 3px rgba(46,204,113,.5); }
+#dnd-dm-strip .dnd-dm-thumbs { display: flex; gap: 6px; max-width: 60vw; overflow-x: auto; }
+.dnd-dm-thumb {
+  position: relative; width: 46px; height: 60px; border-radius: 8px; overflow: hidden;
+  cursor: pointer; border: 2px solid transparent; background: #241c3a; flex: 0 0 auto;
+}
+.dnd-dm-thumb img { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity .12s; }
+.dnd-dm-thumb.active { border-color: #e4c478; box-shadow: 0 0 10px rgba(228,196,120,.5); }
+.dnd-dm-thumb.active img { opacity: 1; }
+.dnd-dm-thumb .dnd-dm-kbd {
+  position: absolute; top: 2px; left: 2px; font-size: 10px; font-weight: 800; color: #e4c478;
+  background: rgba(0,0,0,.65); border-radius: 4px; padding: 0 5px;
+}
+#dnd-dm-strip .dnd-dm-sens { width: 84px; flex: 0 0 auto; accent-color: #e4c478; }
+
+/* player character picker + pause button inside the strip */
+#dnd-dm-strip .dnd-player-sel {
+  pointer-events: auto; background: #251c3c; color: #f4ecd2;
+  border: 1px solid rgba(228,196,120,0.5); border-radius: 9px;
+  padding: 8px 10px; font-size: 13px; font-family: inherit; max-width: 200px;
+}
+#dnd-dm-strip .dnd-dm-pause {
+  width: 40px; height: 40px; border-radius: 10px; cursor: pointer; flex: 0 0 auto;
+  border: 1px solid rgba(228,196,120,0.4); background: #251c3c; color: #f4ecd2; font-size: 16px;
+}
+#dnd-dm-strip.paused .dnd-dm-pause { background: #c0392b; color: #fff; border-color: #c0392b; }

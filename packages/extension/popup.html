@@ -23,6 +23,11 @@
   <h1>D&amp;D Voice Overlay</h1>
   <label for="code">Campaign code</label>
   <input id="code" type="text" placeholder="e.g. RAVEN7" style="text-transform:uppercase" />
+  <label for="join" style="margin-top:10px;">Join password (only if your campaign has one)</label>
+  <input id="join" type="password" placeholder="leave blank if none" />
+  <label style="display:flex;align-items:center;gap:7px;margin-top:12px;cursor:pointer;font-size:13px;color:#1d1d1f;">
+    <input type="checkbox" id="dm" style="width:auto;" /> 👑 I'm the DM — show the control strip on Roll20
+  </label>
   <label for="url" style="margin-top:10px;">Relay base URL (advanced)</label>
   <input id="url" type="text" placeholder="https://my-relay.example.com" />
   <div class="row">
@@ -30,6 +35,7 @@
     <button class="test" id="test">Test</button>
   </div>
   <div id="status"></div>
+  <button id="manageBtn" style="width:100%;margin-top:10px;padding:8px;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;background:#5865F2;color:#fff;">Create / manage campaign &amp; characters</button>
   <button id="pause" style="width:100%;margin-top:10px;padding:8px;border:0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;background:#3a3a3a;color:#fff;">Pause / Resume overlay</button>
   <div class="hint" style="margin-top:6px;">Shortcut: <b>Ctrl+Shift+P</b> toggles the overlay on <b>your own screen only</b> (for out-of-character talk).</div>
   <div class="hint">Ask your host for the <b>campaign code</b>. The relay URL is
