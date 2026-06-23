@@ -128,9 +128,19 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ ok: true, mode: supabaseOn ? "supabase" : "file", rooms: rooms.size }));
     }
 
-    if (url.pathname === "/create" && req.method === "GET") {
+    if ((url.pathname === "/" || url.pathname === "/mic" || url.pathname === "/create") && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CORS });
-      return res.end(CREATE_HTML);
+      return res.end(PORTAL_HTML);
+    }
+    if (url.pathname === "/room") {
+      const room = roomOf(url);
+      let exists = false, name: string | null = null;
+      if (supabaseOn) {
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?room=eq.${encodeURIComponent(room)}&select=room,name`, { headers: sbHeaders });
+        if (r.ok) { const rows = (await r.json()) as any[]; if (rows.length) { exists = true; name = rows[0].name; } }
+      } else if (room === "DEFAULT") { exists = true; name = "Default"; }
+      res.writeHead(200, { "Content-Type": "application/json", ...CORS });
+      return res.end(JSON.stringify({ exists, name }));
     }
     if (url.pathname === "/create" && req.method === "POST") {
       if (!supabaseOn) { res.writeHead(503, CORS); return res.end("not configured"); }
@@ -141,11 +151,6 @@ const server = http.createServer(async (req, res) => {
       const room = await sbCreateRoom(name);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
       return res.end(JSON.stringify({ ok: true, room }));
-    }
-
-    if (url.pathname === "/mic" && req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CORS });
-      return res.end(MIC_HTML);
     }
 
     if (url.pathname === "/campaign.json") {
@@ -223,85 +228,121 @@ wss.on("connection", async (ws, req) => {
 setInterval(() => { for (const ws of wss.clients) if (ws.readyState === WebSocket.OPEN) ws.ping(); }, 30_000);
 server.listen(PORT, () => console.log(`Relay on :${PORT} (mode: ${supabaseOn ? "supabase" : "file"})`));
 
-// ---- Host page: create a campaign -----------------------------------------
-const CREATE_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Create campaign</title>
-<style>body{font-family:system-ui,Segoe UI,sans-serif;max-width:460px;margin:36px auto;padding:0 18px;color:#1d1d1f}
-h1{font-size:20px}label{display:block;margin:14px 0 4px;font-size:13px;color:#444;font-weight:600}
-input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px}
-button{margin-top:16px;width:100%;padding:12px;border:0;border-radius:8px;background:#5865F2;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
-.hint{font-size:12px;color:#888;margin-top:6px;line-height:1.4}.bad{color:#c0392b}
-#out{margin-top:18px;padding:14px;border:1px solid #e3dcc0;background:#fbf7e9;border-radius:10px;display:none}
-code{background:#eee;padding:2px 6px;border-radius:5px;font-size:15px}</style></head><body>
-<h1>🎲 Create a campaign</h1>
-<p class="hint">For the host. Creates a private room code you share with your players.</p>
-<label>Campaign name</label><input id="name" placeholder="e.g. Curse of Strahd">
-<label>Admin password</label><input id="pw" type="password" placeholder="your ADMIN_PASSWORD">
-<button id="go">Create campaign</button>
-<div id="out"></div>
-<script>
-var $=function(i){return document.getElementById(i);};
-$('go').onclick=function(){
- var name=$('name').value.trim(),pw=$('pw').value,out=$('out');
- if(!name||!pw){out.style.display='block';out.innerHTML='<span class="bad">Enter a name and the admin password.</span>';return;}
- fetch('/create?'+new URLSearchParams({name:name,password:pw}),{method:'POST'}).then(function(r){
-   if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();
- }).then(function(j){
-   var base=location.origin;
-   out.style.display='block';
-   out.innerHTML='<b>Campaign code:</b> <code>'+j.room+'</code><br><br>'+
-     'Players go to:<br><code>'+base+'/mic?room='+j.room+'</code><br><br>'+
-     'In the Roll20 overlay extension popup, enter this same code as the <b>Campaign code</b>.';
- }).catch(function(e){out.style.display='block';out.innerHTML='<span class="bad">Failed: '+e.message+'</span>';});
-};
-</script></body></html>`;
+// ---- Unified portal (join/create + roster + upload + mic) ------------------
+const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>D&D Voice Overlay</title>
+<style>
+ :root{--gold:#e4c478;--ink:#1d1d1f}
+ body{font-family:system-ui,Segoe UI,sans-serif;max-width:480px;margin:0 auto;padding:28px 18px 60px;color:var(--ink)}
+ h1{font-size:22px;margin:0 0 4px}.sub{color:#888;font-size:13px;margin:0 0 18px}
+ label{display:block;margin:14px 0 4px;font-size:13px;color:#444;font-weight:600}
+ select,input[type=text],input[type=password],input[type=number],input[type=file]{width:100%;box-sizing:border-box;padding:10px;border:1px solid #ccc;border-radius:9px;font-size:14px}
+ input[type=range]{width:100%}
+ button{margin-top:14px;width:100%;padding:12px;border:0;border-radius:9px;background:#5865F2;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
+ button.stop{background:#c0392b}button.sec{background:#3a3a3a;margin-top:10px;padding:10px}button.ghost{background:#eee;color:#333}
+ .hint{font-size:12px;color:#888;margin-top:4px;line-height:1.45}.bad{color:#c0392b}.ok{color:#1e8e3e}.live{color:#1e8e3e}.idle{color:#888}
+ details{margin-top:12px;border:1px solid #eee;border-radius:10px;padding:10px 14px}summary{cursor:pointer;font-size:13px;font-weight:600;color:#444}
+ #meterWrap{height:18px;background:#eee;border-radius:9px;overflow:hidden;margin-top:8px}#meter{height:100%;width:0%;background:#2ecc71;transition:width 60ms linear}
+ #state{margin-top:14px;font-size:15px;font-weight:700;min-height:22px}
+ img#prev{max-width:120px;border-radius:8px;margin-top:8px;display:none}
+ .card{border:1px solid #e3dcc0;background:#fbf7e9;border-radius:12px;padding:14px;margin-top:14px}
+ code{background:#efe9d6;padding:2px 7px;border-radius:6px;font-size:14px}
+ .hdr{display:flex;justify-content:space-between;align-items:center;gap:10px}
+ .pill{background:#1b1530;color:var(--gold);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:700}
+ .switch{font-size:12px;color:#5865F2;cursor:pointer;text-decoration:underline;background:none;border:0;width:auto;margin:0;padding:0}
+</style></head><body>
 
-// ---- Player page: pick char, upload, mic VAD ------------------------------
-const MIC_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>D&D Voice Overlay - Mic</title>
-<style>body{font-family:system-ui,Segoe UI,sans-serif;max-width:460px;margin:34px auto;padding:0 18px;color:#1d1d1f}
-h1{font-size:20px}label{display:block;margin:14px 0 4px;font-size:13px;color:#444;font-weight:600}
-select,input[type=text],input[type=number],input[type=file]{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px}
-input[type=range]{width:100%}
-button{margin-top:14px;width:100%;padding:12px;border:0;border-radius:8px;background:#5865F2;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
-button.stop{background:#c0392b}button.sec{background:#3a3a3a;margin-top:10px;padding:10px}
-.hint{font-size:12px;color:#888;margin-top:4px;line-height:1.4}.bad{color:#c0392b}.ok{color:#1e8e3e}.live{color:#1e8e3e}.idle{color:#888}
-#meterWrap{height:18px;background:#eee;border-radius:9px;overflow:hidden;margin-top:8px}#meter{height:100%;width:0%;background:#2ecc71;transition:width 60ms linear}
-#state{margin-top:14px;font-size:15px;font-weight:700;min-height:22px}
-details{margin-top:12px;border:1px solid #eee;border-radius:8px;padding:8px 12px}summary{cursor:pointer;font-size:13px;font-weight:600;color:#444}
-img#prev{max-width:120px;border-radius:8px;margin-top:8px;display:none}#banner{font-size:13px;color:#666;margin-bottom:6px}</style></head><body>
-<h1>🎙️ D&D Voice Overlay</h1>
-<div id="banner"></div>
-<p class="hint">Lights up your character on Roll20 when you talk - your own mic, no Discord. Audio never leaves your device; only an on/off signal is sent. Keep this tab open while you play.</p>
+<div id="joinView">
+ <h1>🎭 D&D Voice Overlay</h1>
+ <p class="sub">Your character lights up on Roll20 when you talk - using your own mic.</p>
+ <label>Campaign code</label>
+ <input id="code" type="text" placeholder="e.g. RAVEN7" style="text-transform:uppercase">
+ <button id="joinBtn">Join campaign</button>
+ <div id="joinMsg" class="hint"></div>
+ <details>
+  <summary>I'm the Game Master - create a new campaign</summary>
+  <label>Campaign name</label><input id="cName" type="text" placeholder="e.g. Curse of Strahd">
+  <label>Admin password</label><input id="cPw" type="password" placeholder="your ADMIN_PASSWORD">
+  <button id="createBtn" class="sec">Create campaign</button>
+  <div id="createMsg" class="hint"></div>
+ </details>
+</div>
 
-<label>I'm playing</label>
-<select id="char"><option value="">Loading...</option></select>
+<div id="playView" style="display:none">
+ <div class="hdr"><h1 style="font-size:20px;margin:0">🎭 Voice Overlay</h1><span class="pill" id="pill"></span></div>
+ <button class="switch" id="switchBtn">switch campaign</button>
 
-<details><summary>+ Add or update my character</summary>
- <label>Character name</label><input id="newName" type="text" placeholder="e.g. Medvind">
- <label>Portrait image (transparent PNG looks best)</label><input id="newFile" type="file" accept="image/*">
- <img id="prev"><button id="add" class="sec">Save my portrait</button><div id="addMsg" class="hint"></div>
-</details>
+ <details id="hostBox" style="display:none">
+  <summary>Share with players / host info</summary>
+  <div class="hint" id="shareInfo"></div>
+ </details>
 
-<label>Sensitivity (fill the bar only when you talk)</label>
-<input id="sens" type="range" min="1" max="40" value="6"><div id="meterWrap"><div id="meter"></div></div>
-<label>Hold (ms) - stays lit through short pauses</label><input id="holdNum" type="number" value="1200" min="200" max="4000" step="100">
-<button id="go">Start microphone</button>
-<div id="state" class="idle">Stopped</div>
+ <label>I'm playing</label>
+ <select id="char"><option value="">Loading...</option></select>
+
+ <details><summary>+ Add or update my character</summary>
+  <label>Character name</label><input id="newName" type="text" placeholder="e.g. Medvind">
+  <label>Portrait image (transparent PNG looks best)</label><input id="newFile" type="file" accept="image/*">
+  <img id="prev"><button id="add" class="sec">Save my portrait</button><div id="addMsg" class="hint"></div>
+ </details>
+
+ <label>Sensitivity (fill the bar only when you talk)</label>
+ <input id="sens" type="range" min="1" max="40" value="6"><div id="meterWrap"><div id="meter"></div></div>
+ <label>Hold (ms) - stays lit through short pauses</label><input id="holdNum" type="number" value="1200" min="200" max="4000" step="100">
+ <button id="go">Start microphone</button>
+ <div id="state" class="idle">Stopped</div>
+
+ <p class="hint" style="margin-top:18px">To see the portraits, install the Roll20 overlay extension and enter this campaign code in its popup. Keep this tab open while you play.</p>
+</div>
+
 <script>
 (function(){
  var $=function(i){return document.getElementById(i);};
- var room=(new URLSearchParams(location.search).get('room')||'DEFAULT').toUpperCase();
- $('banner').textContent='Campaign: '+room;
- var ws=null,ac=null,an=null,stream=null,raf=null,running=false,speaking=false,stopTimer=null;
+ var room='', ws=null,ac=null,an=null,stream=null,raf=null,running=false,speaking=false,stopTimer=null;
  var state=$('state'),meter=$('meter');
  function api(p){return p+(p.indexOf('?')<0?'?':'&')+'room='+encodeURIComponent(room);}
+
+ // ---- join / create ----
+ function showJoin(){ $('joinView').style.display='block'; $('playView').style.display='none'; }
+ function enter(code,name,isHost){
+   room=code.toUpperCase();
+   try{localStorage.setItem('dndRoom',room);}catch(e){}
+   $('pill').textContent=room;
+   $('hostBox').style.display = isHost ? 'block' : 'none';
+   if(isHost){
+     $('hostBox').open=true;
+     $('shareInfo').innerHTML='Player link: <code>'+location.origin+'/?room='+room+'</code><br>'+
+       'Extension campaign code: <code>'+room+'</code>'+(name?('<br>Campaign: '+name):'');
+   }
+   $('joinView').style.display='none'; $('playView').style.display='block';
+   loadChars();
+ }
+ $('joinBtn').onclick=function(){
+   var code=($('code').value||'').trim().toUpperCase(), m=$('joinMsg'); m.className='hint';
+   if(!code){m.className='bad';m.textContent='Enter a campaign code.';return;}
+   m.textContent='Checking...';
+   fetch('/room?room='+encodeURIComponent(code)).then(function(r){return r.json();}).then(function(j){
+     if(j.exists){ m.textContent=''; enter(code,j.name,false); }
+     else { m.className='bad'; m.textContent='No campaign with that code.'; }
+   }).catch(function(){m.className='bad';m.textContent='Could not reach server.';});
+ };
+ $('createBtn').onclick=function(){
+   var name=($('cName').value||'').trim(), pw=$('cPw').value, m=$('createMsg'); m.className='hint';
+   if(!name||!pw){m.className='bad';m.textContent='Enter a name and admin password.';return;}
+   m.textContent='Creating...';
+   fetch('/create?'+new URLSearchParams({name:name,password:pw}),{method:'POST'})
+   .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();})
+   .then(function(j){ m.className='ok'; m.textContent='Created code '+j.room; enter(j.room,name,true); })
+   .catch(function(e){m.className='bad';m.textContent='Failed: '+e.message;});
+ };
+ $('switchBtn').onclick=function(){ if(running)stopMic(); try{localStorage.removeItem('dndRoom');}catch(e){} room=''; showJoin(); };
+
+ // ---- roster + upload ----
  function loadChars(sel){return fetch(api('/campaign.json'),{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
    var s=$('char'),chars=(c&&c.characters)||{},ids=Object.keys(chars);
    s.innerHTML=ids.length?'<option value="">- choose your character -</option>':'<option value="">(none yet - add yourself below)</option>';
    ids.forEach(function(id){var o=document.createElement('option');o.value=id;o.textContent=chars[id].name||id;if(id===sel)o.selected=true;s.appendChild(o);});
  }).catch(function(){$('char').innerHTML='<option value="">(could not load)</option>';});}
- loadChars();
  $('newFile').onchange=function(e){var f=e.target.files[0];if(f){$('prev').src=URL.createObjectURL(f);$('prev').style.display='block';}};
  $('add').onclick=function(){
    var name=$('newName').value.trim(),f=$('newFile').files[0],m=$('addMsg');m.className='hint';
@@ -313,6 +354,8 @@ img#prev{max-width:120px;border-radius:8px;margin-top:8px;display:none}#banner{f
    .then(function(j){m.className='ok';m.textContent='✓ Saved!';return loadChars(j.id);})
    .catch(function(e){m.className='bad';m.textContent='Failed: '+e.message;});
  };
+
+ // ---- mic VAD ----
  function wsUrl(){var p=location.protocol==='https:'?'wss://':'ws://';return p+location.host+'/?role=reporter&room='+encodeURIComponent(room);}
  function send(on){var id=$('char').value;if(ws&&ws.readyState===1&&id)ws.send(JSON.stringify({type:'speaking',userId:id,speaking:on}));}
  function setSpeaking(on){if(on===speaking)return;speaking=on;send(on);state.className=on?'live':'idle';state.textContent=on?'🔊 Speaking - portrait is lit':'Listening...';}
@@ -322,16 +365,26 @@ img#prev{max-width:120px;border-radius:8px;margin-top:8px;display:none}#banner{f
    if(level>thr){if(stopTimer){clearTimeout(stopTimer);stopTimer=null;}setSpeaking(true);}
    else if(speaking&&!stopTimer){stopTimer=setTimeout(function(){stopTimer=null;setSpeaking(false);},hold);}
    raf=requestAnimationFrame(loop);}
- function start(){var id=$('char').value;if(!id){state.className='bad';state.textContent='Pick your character first.';return;}
+ function startMic(){var id=$('char').value;if(!id){state.className='bad';state.textContent='Pick your character first.';return;}
    navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false}).then(function(st){
      stream=st;ac=new (window.AudioContext||window.webkitAudioContext)();var sn=ac.createMediaStreamSource(st);an=ac.createAnalyser();an.fftSize=512;sn.connect(an);
      ws=new WebSocket(wsUrl());ws.onopen=function(){running=true;state.className='idle';state.textContent='Listening...';loop();};
-     ws.onclose=function(){if(running){state.className='bad';state.textContent='Disconnected (unknown code?).';stop();}};
+     ws.onclose=function(){if(running){state.className='bad';state.textContent='Disconnected.';stopMic();}};
      $('go').textContent='Stop microphone';$('go').className='stop';
    }).catch(function(e){state.className='bad';state.textContent='Mic denied: '+e.message;});}
- function stop(){running=false;if(raf)cancelAnimationFrame(raf);if(stopTimer){clearTimeout(stopTimer);stopTimer=null;}setSpeaking(false);
+ function stopMic(){running=false;if(raf)cancelAnimationFrame(raf);if(stopTimer){clearTimeout(stopTimer);stopTimer=null;}setSpeaking(false);
    if(ws){try{ws.close();}catch(e){}ws=null;}if(stream){stream.getTracks().forEach(function(t){t.stop();});stream=null;}if(ac){try{ac.close();}catch(e){}ac=null;}
    meter.style.width='0%';$('go').textContent='Start microphone';$('go').className='';state.className='idle';state.textContent='Stopped';}
- $('go').onclick=function(){running?stop():start();};
+ $('go').onclick=function(){running?stopMic():startMic();};
+
+ // ---- boot: ?room= in URL, else last used ----
+ var urlRoom=(new URLSearchParams(location.search).get('room')||'').toUpperCase();
+ var saved=''; try{saved=(localStorage.getItem('dndRoom')||'').toUpperCase();}catch(e){}
+ var initial=urlRoom||saved;
+ if(initial){
+   fetch('/room?room='+encodeURIComponent(initial)).then(function(r){return r.json();}).then(function(j){
+     if(j.exists) enter(initial,j.name,false); else showJoin();
+   }).catch(showJoin);
+ } else showJoin();
 })();
 </script></body></html>`;
