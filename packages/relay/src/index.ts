@@ -79,6 +79,10 @@ async function sbUpload(id: string, name: string, contentType: string, bytes: Bu
   return publicUrl;
 }
 
+function slugify(s: string): string {
+  return s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+}
+
 function readBody(req: http.IncomingMessage, limit = 8 * 1024 * 1024): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -150,18 +154,20 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/admin/upload" && req.method === "POST") {
       if (!supabaseOn) { res.writeHead(503, CORS); return res.end("uploads not configured"); }
-      const id = (url.searchParams.get("id") ?? "").trim();
+      const rawId = (url.searchParams.get("id") ?? "").trim();
       const name = (url.searchParams.get("name") ?? "").trim();
       const pass = url.searchParams.get("password") ?? "";
       const type = url.searchParams.get("type") ?? "image/png";
       if (!ADMIN_PASSWORD || pass !== ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("wrong password"); }
-      if (!/^\d{5,25}$/.test(id)) { res.writeHead(400, CORS); return res.end("invalid Discord ID"); }
       if (!name) { res.writeHead(400, CORS); return res.end("name required"); }
+      // Use a provided id (e.g. a Discord ID) if valid, otherwise derive one from the name.
+      const id = /^[A-Za-z0-9_-]{3,40}$/.test(rawId) ? rawId : slugify(name);
+      if (!id) { res.writeHead(400, CORS); return res.end("invalid name"); }
       const bytes = await readBody(req);
       if (!bytes.length) { res.writeHead(400, CORS); return res.end("no image"); }
       await sbUpload(id, name, type, bytes);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
-      return res.end(JSON.stringify({ ok: true }));
+      return res.end(JSON.stringify({ ok: true, id }));
     }
 
     res.writeHead(404, CORS); res.end("not found");
@@ -286,35 +292,45 @@ const MIC_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
  body{font-family:system-ui,Segoe UI,sans-serif;max-width:460px;margin:36px auto;padding:0 18px;color:#1d1d1f}
  h1{font-size:20px} label{display:block;margin:14px 0 4px;font-size:13px;color:#444;font-weight:600}
- select,input[type=password]{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px}
+ select,input[type=password],input[type=text],input[type=number]{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px}
  input[type=range]{width:100%}
- button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:8px;background:#5865F2;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
- button.stop{background:#c0392b}
+ button{margin-top:14px;width:100%;padding:12px;border:0;border-radius:8px;background:#5865F2;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+ button.stop{background:#c0392b} button.sec{background:#3a3a3a;margin-top:10px;padding:10px}
  .hint{font-size:12px;color:#888;margin-top:4px;line-height:1.4}
  #meterWrap{height:18px;background:#eee;border-radius:9px;overflow:hidden;margin-top:8px}
  #meter{height:100%;width:0%;background:#2ecc71;transition:width 60ms linear}
- #thr{height:100%;}
  #state{margin-top:14px;font-size:15px;font-weight:700;min-height:22px}
- .live{color:#1e8e3e}.idle{color:#888}.bad{color:#c0392b}
- .row{display:flex;gap:6px;align-items:center}
+ .live{color:#1e8e3e}.idle{color:#888}.bad{color:#c0392b}.ok{color:#1e8e3e}
+ details{margin-top:12px;border:1px solid #eee;border-radius:8px;padding:8px 12px}
+ summary{cursor:pointer;font-size:13px;font-weight:600;color:#444}
+ img#prev{max-width:120px;border-radius:8px;margin-top:8px;display:none}
 </style></head><body>
 <h1>🎙️ D&D Voice Overlay - your microphone</h1>
 <p class="hint">This lights up your character on everyone's Roll20 when you talk - using your own mic, no Discord needed. Audio never leaves your device; only an on/off signal is sent. Keep this tab open while you play.</p>
 
-<label>I'm playing</label>
-<select id="char"><option value="">Loading characters...</option></select>
-
 <label>Group password</label>
 <input id="pw" type="password" placeholder="ask your host">
 
-<label>Sensitivity (move the slider so the bar fills only when you talk)</label>
+<label>I'm playing</label>
+<select id="char"><option value="">Loading characters...</option></select>
+
+<details id="addBox">
+ <summary>+ Add or update my character</summary>
+ <label>Character name</label>
+ <input id="newName" type="text" placeholder="e.g. Medvind">
+ <label>Portrait image (PNG with transparent background looks best)</label>
+ <input id="newFile" type="file" accept="image/*">
+ <img id="prev">
+ <button id="add" class="sec">Save my portrait</button>
+ <div id="addMsg" class="hint"></div>
+</details>
+
+<label>Sensitivity (move so the bar fills only when you talk)</label>
 <input id="sens" type="range" min="1" max="40" value="6">
 <div id="meterWrap"><div id="meter"></div></div>
-<p class="hint">The green bar is your live mic level. The portrait triggers when it passes your sensitivity threshold.</p>
 
-<label>Hold (ms) - keeps you "speaking" through short pauses</label>
-<input id="hold" type="password" style="display:none">
-<input id="holdNum" type="number" value="1200" min="200" max="4000" step="100" style="width:120px;padding:8px;border:1px solid #ccc;border-radius:8px">
+<label>Hold (ms) - stays "speaking" through short pauses</label>
+<input id="holdNum" type="number" value="1200" min="200" max="4000" step="100">
 
 <button id="go">Start microphone</button>
 <div id="state" class="idle">Stopped</div>
@@ -326,17 +342,40 @@ const MIC_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  var speaking=false, stopTimer=null;
  var state=$('state'), meter=$('meter');
 
- // load characters
- fetch('/campaign.json',{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
-   var sel=$('char'); sel.innerHTML='';
-   var chars=(c&&c.characters)||{};
-   var ids=Object.keys(chars);
-   if(!ids.length){ sel.innerHTML='<option value="">(no characters yet - upload at /admin)</option>'; return; }
-   sel.innerHTML='<option value="">- choose your character -</option>';
-   ids.forEach(function(id){
-     var o=document.createElement('option'); o.value=id; o.textContent=chars[id].name||id; sel.appendChild(o);
-   });
- }).catch(function(){ $('char').innerHTML='<option value="">(could not load characters)</option>'; });
+ function loadChars(selectId){
+   return fetch('/campaign.json',{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
+     var sel=$('char'); var chars=(c&&c.characters)||{}; var ids=Object.keys(chars);
+     sel.innerHTML = ids.length ? '<option value="">- choose your character -</option>'
+                                : '<option value="">(none yet - add yourself below)</option>';
+     ids.forEach(function(id){
+       var o=document.createElement('option'); o.value=id; o.textContent=chars[id].name||id;
+       if(id===selectId) o.selected=true;
+       sel.appendChild(o);
+     });
+   }).catch(function(){ $('char').innerHTML='<option value="">(could not load characters)</option>'; });
+ }
+ loadChars();
+
+ // preview chosen image
+ $('newFile').onchange=function(e){ var f=e.target.files[0]; if(f){ $('prev').src=URL.createObjectURL(f); $('prev').style.display='block'; } };
+
+ // add / update my character
+ $('add').onclick=function(){
+   var name=$('newName').value.trim(), pw=$('pw').value, f=$('newFile').files[0], m=$('addMsg');
+   m.className='hint';
+   if(!pw){ m.className='bad'; m.textContent='Enter the group password first.'; return; }
+   if(!name){ m.className='bad'; m.textContent='Enter a character name.'; return; }
+   if(!f){ m.className='bad'; m.textContent='Choose an image.'; return; }
+   m.textContent='Uploading...';
+   var q=new URLSearchParams({name:name,password:pw,type:f.type||'image/png'});
+   fetch('/admin/upload?'+q.toString(),{method:'POST',body:f}).then(function(r){
+     if(!r.ok){ return r.text().then(function(t){ throw new Error(t); }); }
+     return r.json();
+   }).then(function(j){
+     m.className='ok'; m.textContent='✓ Saved! You are now selectable above.';
+     return loadChars(j.id);
+   }).catch(function(err){ m.className='bad'; m.textContent='Failed: '+err.message; });
+ };
 
  function wsUrl(pw){
    var proto = location.protocol==='https:' ? 'wss://' : 'ws://';
@@ -356,10 +395,9 @@ const MIC_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
    if(!running) return;
    var buf=new Uint8Array(an.fftSize); an.getByteTimeDomainData(buf);
    var sum=0; for(var i=0;i<buf.length;i++){ var x=(buf[i]-128)/128; sum+=x*x; }
-   var rms=Math.sqrt(sum/buf.length);
-   var level=Math.min(1, rms*4);
+   var level=Math.min(1, Math.sqrt(sum/buf.length)*4);
    meter.style.width=(level*100).toFixed(0)+'%';
-   var threshold=parseInt($('sens').value,10)/100; // 0.01 .. 0.40
+   var threshold=parseInt($('sens').value,10)/100;
    var hold=Math.max(200, parseInt($('holdNum').value,10)||1200);
    if(level>threshold){
      if(stopTimer){ clearTimeout(stopTimer); stopTimer=null; }
