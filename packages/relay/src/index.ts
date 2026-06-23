@@ -125,7 +125,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/health") {
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
-      return res.end(JSON.stringify({ ok: true, mode: supabaseOn ? "supabase" : "file", rooms: rooms.size }));
+      return res.end(JSON.stringify({ ok: true, mode: supabaseOn ? "supabase" : "file", admin: !!ADMIN_PASSWORD, rooms: rooms.size }));
     }
 
     if ((url.pathname === "/" || url.pathname === "/mic" || url.pathname === "/create") && req.method === "GET") {
@@ -146,7 +146,8 @@ const server = http.createServer(async (req, res) => {
       if (!supabaseOn) { res.writeHead(503, CORS); return res.end("not configured"); }
       const pass = url.searchParams.get("password") ?? "";
       const name = (url.searchParams.get("name") ?? "").trim();
-      if (!ADMIN_PASSWORD || pass !== ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("wrong admin password"); }
+      if (!ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("ADMIN_PASSWORD is not set on the server (add it on Render and redeploy)"); }
+      if (pass !== ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("wrong admin password"); }
       if (!name) { res.writeHead(400, CORS); return res.end("name required"); }
       const room = await sbCreateRoom(name);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
