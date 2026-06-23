@@ -108,13 +108,13 @@ async function sbUpload(room: string, id: string, name: string, contentType: str
   if (!row.ok) throw new Error(`db ${row.status}: ${await row.text()}`);
   return publicUrl;
 }
-async function sbCreateRoom(name: string, dmHash: string, joinHash: string | null): Promise<string> {
+async function sbCreateRoom(name: string, joinHash: string | null): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = genRoomCode();
     const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns`, {
       method: "POST",
       headers: { ...sbHeaders, "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({ room: code, name, dm_key: dmHash, join_hash: joinHash }),
+      body: JSON.stringify({ room: code, name, join_hash: joinHash }),
     });
     if (r.ok) { roomExistsCache.add(code); return code; }
     if (r.status !== 409) throw new Error(`create ${r.status}: ${await r.text()}`); // 409 = code clash, retry
@@ -146,14 +146,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/room") {
       const room = roomOf(url);
-      const dm = url.searchParams.get("dm") ?? "";
       const join = url.searchParams.get("join") ?? "";
       const camp = await sbGetCampaign(room);
-      const isDm = !!(dm && camp.dmHash && sha256(dm) === camp.dmHash);
       const joinRequired = !!camp.joinHash;
       const joinOk = !camp.joinHash || (!!join && sha256(join) === camp.joinHash);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
-      return res.end(JSON.stringify({ exists: camp.exists, name: camp.name ?? null, isDm, joinRequired, joinOk }));
+      return res.end(JSON.stringify({ exists: camp.exists, name: camp.name ?? null, joinRequired, joinOk }));
     }
     if (url.pathname === "/create" && req.method === "POST") {
       if (!supabaseOn) { res.writeHead(503, CORS); return res.end("not configured"); }
@@ -162,11 +160,9 @@ const server = http.createServer(async (req, res) => {
       // Creation is OPEN unless an operator lock (ADMIN_PASSWORD) is configured.
       if (ADMIN_PASSWORD && pass !== ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("wrong admin password"); }
       if (!name) { res.writeHead(400, CORS); return res.end("name required"); }
-      const dmpw = url.searchParams.get("dmpw") ?? "";
-      if (dmpw.length < 3) { res.writeHead(400, CORS); return res.end("choose a campaign password (min 3 chars)"); }
       const joinpw = url.searchParams.get("joinpw") ?? "";
       const joinHash = joinpw ? sha256(joinpw) : null;
-      const room = await sbCreateRoom(name, sha256(dmpw), joinHash);
+      const room = await sbCreateRoom(name, joinHash);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
       return res.end(JSON.stringify({ ok: true, room }));
     }
@@ -306,7 +302,6 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  <details>
   <summary>I'm the Game Master — create a new campaign</summary>
   <label>Campaign name</label><input id="cName" type="text" placeholder="e.g. Curse of Strahd">
-  <label>Campaign password <span style="text-transform:none;font-weight:400;color:#8a82a6">(you use this to be the DM)</span></label><input id="cDmPw" type="password" placeholder="choose a password">
   <label>Join password <span style="text-transform:none;font-weight:400;color:#8a82a6">(optional &mdash; leave blank for open join)</span></label><input id="cJoinPw" type="password" placeholder="optional">
   <label id="cPwLabel" style="display:none">Admin password</label><input id="cPw" type="password" placeholder="admin password (only if your server requires it)" style="display:none">
   <button id="createBtn" class="ghost">Create campaign</button>
@@ -320,11 +315,7 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 
  <details id="hostBox" style="display:none"><summary>👑 Invite players</summary><div class="hint" id="shareInfo"></div></details>
 
- <div id="dmUnlock" style="display:none">
-  <button class="switch" id="dmUnlockBtn">👑 I'm the DM</button>
-  <div id="dmPwRow" style="display:none"><input id="dmPw" type="password" placeholder="campaign password"><button id="dmGo" class="ghost">Unlock DM mode</button><div id="dmMsg" class="hint"></div></div>
- </div>
- <div class="seg" id="dmSeg" style="display:none"><button id="mPlayer" class="on">🎙️ Player</button><button id="mDm">👑 DM</button></div>
+ <label style="display:flex;align-items:center;gap:9px;margin-top:16px;cursor:pointer;font-size:14px;color:var(--ink);text-transform:none;letter-spacing:0"><input type="checkbox" id="dmChk" style="width:auto;margin:0"> 👑 I'm the DM &mdash; control all characters</label>
 
  <div id="playerPane">
   <label>I'm playing</label>
@@ -369,36 +360,25 @@ function renderShare(){
    $('shareInfo').innerHTML='<b>You are the DM 👑</b> &mdash; players you invite can only control their own character.<br><br><b>Send your players this one link:</b><br><code id="plink">'+plink+'</code> <button id="copyP" class="ghost" style="width:auto;margin-top:8px;padding:6px 14px">Copy link</button><br><span style="color:#8a82a6">(or they enter code <b>'+room+'</b> in the overlay extension)</span>';
    var cp=$('copyP'); if(cp)cp.onclick=function(){try{navigator.clipboard.writeText(plink);}catch(e){} cp.textContent='Copied!'; setTimeout(function(){cp.textContent='Copy link';},1500);};
  }
- function applyDmAccess(isDm){
-   $('dmSeg').style.display=isDm?'flex':'none';
-   $('dmUnlock').style.display=isDm?'none':'block';
-   $('hostBox').style.display=isDm?'block':'none';
-   if(isDm){renderShare();setMode('dm');}else setMode('player');
+ function applyDmMode(on){
+   $('dmChk').checked=on;
+   $('hostBox').style.display=on?'block':'none';
+   if(on)renderShare();
+   setMode(on?'dm':'player');
  }
- function enter(code,name,isDm){
+ function enter(code,name,asDm){
    room=code.toUpperCase(); try{localStorage.setItem('dndRoom',room);}catch(e){}
    $('pill').textContent=room;
-   applyDmAccess(isDm);
+   applyDmMode(!!asDm);
    $('joinView').style.display='none'; $('playView').style.display='block'; loadChars();
  }
- $('dmUnlockBtn').onclick=function(){var r=$('dmPwRow');r.style.display=r.style.display==='none'?'block':'none';};
- $('dmGo').onclick=function(){
-   var pw=$('dmPw').value,m=$('dmMsg');m.className='hint';
-   if(!pw){m.className='bad';m.textContent='Enter the campaign password.';return;}
-   m.textContent='Checking...';
-   fetch('/room?room='+encodeURIComponent(room)+'&dm='+encodeURIComponent(pw)).then(function(r){return r.json();}).then(function(j){
-     if(j.isDm){try{localStorage.setItem('dndDm_'+room,pw);}catch(e){}m.textContent='';applyDmAccess(true);}
-     else{m.className='bad';m.textContent='Wrong campaign password.';}
-   }).catch(function(){m.className='bad';m.textContent='Could not reach server.';});
- };
+ $('dmChk').onchange=function(){applyDmMode($('dmChk').checked);};
   $('joinBtn').onclick=function(){
    var code=($('code').value||'').trim().toUpperCase(),m=$('joinMsg');m.className='hint';
    if(!code){m.className='bad';m.textContent='Enter a campaign code.';return;}
    m.textContent='Checking...';
-   var dk=''; try{dk=localStorage.getItem('dndDm_'+code)||'';}catch(e){}
    var jp=$('joinPw').value||''; if(!jp){try{jp=localStorage.getItem('dndJoin_'+code)||'';}catch(e){}}
-   dmKeyVal=dk;
-   var q='/room?room='+encodeURIComponent(code)+(dk?('&dm='+encodeURIComponent(dk)):'')+(jp?('&join='+encodeURIComponent(jp)):'');
+   var q='/room?room='+encodeURIComponent(code)+(jp?('&join='+encodeURIComponent(jp)):'');
    fetch(q).then(function(r){return r.json();}).then(function(j){
      if(!j.exists){m.className='bad';m.textContent='No campaign with that code.';return;}
      if(j.joinRequired&&!j.joinOk){
@@ -407,19 +387,18 @@ function renderShare(){
        return;
      }
      joinPwVal=jp; if(jp){try{localStorage.setItem('dndJoin_'+code,jp);}catch(e){}}
-     m.textContent=''; enter(code,j.name,!!j.isDm);
+     m.textContent=''; enter(code,j.name,false);
    }).catch(function(){m.className='bad';m.textContent='Could not reach server.';});
  };
  $('createBtn').onclick=function(){
-   var name=($('cName').value||'').trim(),dmpw=($('cDmPw').value||''),joinpw=($('cJoinPw').value||''),pw=$('cPw').value,m=$('createMsg');m.className='hint';
+   var name=($('cName').value||'').trim(),joinpw=($('cJoinPw').value||''),pw=$('cPw').value,m=$('createMsg');m.className='hint';
    if(!name){m.className='bad';m.textContent='Enter a campaign name.';return;}
-   if(dmpw.length<3){m.className='bad';m.textContent='Choose a campaign password (min 3 characters).';return;}
    if(adminRequired&&!pw){m.className='bad';m.textContent='This server requires an admin password.';return;}
    m.textContent='Creating...';
-   var prm={name:name,dmpw:dmpw}; if(joinpw)prm.joinpw=joinpw; if(adminRequired)prm.password=pw;
+   var prm={name:name}; if(joinpw)prm.joinpw=joinpw; if(adminRequired)prm.password=pw;
    fetch('/create?'+new URLSearchParams(prm),{method:'POST'})
    .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();})
-   .then(function(j){try{localStorage.setItem('dndDm_'+j.room,dmpw);if(joinpw)localStorage.setItem('dndJoin_'+j.room,joinpw);}catch(e){}joinPwVal=joinpw;m.className='ok';m.textContent='Created code '+j.room;enter(j.room,name,true);})
+   .then(function(j){try{if(joinpw)localStorage.setItem('dndJoin_'+j.room,joinpw);}catch(e){}joinPwVal=joinpw;m.className='ok';m.textContent='Created code '+j.room;enter(j.room,name,true);})
    .catch(function(e){m.className='bad';m.textContent='Failed: '+e.message;});
  };
  $('switchBtn').onclick=function(){if(running)stopMic();try{localStorage.removeItem('dndRoom');}catch(e){}room='';showJoin();};
@@ -428,13 +407,10 @@ function renderShare(){
  function setMode(m){
    if(speaking)setSpeaking(false);
    mode=m;
-   $('mPlayer').className=m==='player'?'on':''; $('mDm').className=m==='dm'?'on':'';
    $('playerPane').style.display=m==='player'?'block':'none';
    $('dmPane').style.display=m==='dm'?'block':'none';
    if(m==='dm'&&!dmActive&&boardIds.length){setDmActive(boardIds[0]);}
  }
- $('mPlayer').onclick=function(){setMode('player');};
- $('mDm').onclick=function(){setMode('dm');};
 
  function loadChars(sel){return fetch(api('/campaign.json'),{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
    chars=(c&&c.characters)||{}; boardIds=Object.keys(chars);
@@ -504,18 +480,16 @@ function renderShare(){
  $('go').onclick=function(){running?stopMic():startMic();};
 
  var params=new URLSearchParams(location.search);
- var urlRoom=(params.get('room')||'').toUpperCase(), urlDm=params.get('dm')||'', saved='';
+ var urlRoom=(params.get('room')||'').toUpperCase(), saved='';
  try{saved=(localStorage.getItem('dndRoom')||'').toUpperCase();}catch(e){}
  var initial=urlRoom||saved;
  if(initial){
-   var dk=urlDm; if(!dk){try{dk=localStorage.getItem('dndDm_'+initial)||'';}catch(e){}}
    var jp=params.get('join')||''; if(!jp){try{jp=localStorage.getItem('dndJoin_'+initial)||'';}catch(e){}}
-   dmKeyVal=dk||''; if(dk){try{localStorage.setItem('dndDm_'+initial,dk);}catch(e){}}
-   var q='/room?room='+encodeURIComponent(initial)+(dk?('&dm='+encodeURIComponent(dk)):'')+(jp?('&join='+encodeURIComponent(jp)):'');
+   var q='/room?room='+encodeURIComponent(initial)+(jp?('&join='+encodeURIComponent(jp)):'');
    fetch(q).then(function(r){return r.json();}).then(function(j){
      if(!j.exists){showJoin();return;}
      if(j.joinRequired&&!j.joinOk){ $('code').value=initial; $('joinPwRow').style.display='block'; showJoin(); return; }
-     joinPwVal=jp||''; enter(initial,j.name,!!j.isDm);
+     joinPwVal=jp||''; enter(initial,j.name,false);
    }).catch(showJoin);
  } else showJoin();
 })();
