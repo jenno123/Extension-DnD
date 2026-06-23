@@ -23,6 +23,8 @@
 import http from "http";
 import path from "path";
 import { WebSocketServer, WebSocket, RawData } from "ws";
+import { createHash } from "crypto";
+function sha256(x: string): string { return createHash("sha256").update(x).digest("hex"); }
 
 const PORT = Number(process.env.PORT ?? 8787);
 const RELAY_TOKEN = process.env.RELAY_TOKEN ?? "";
@@ -63,12 +65,7 @@ function genRoomCode(): string {
   for (let i = 0; i < 6; i++) s += A[Math.floor(Math.random() * A.length)];
   return s;
 }
-function genDmKey(): string {
-  const A = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let s = "";
-  for (let i = 0; i < 24; i++) s += A[Math.floor(Math.random() * A.length)];
-  return s;
-}
+
 
 const roomExistsCache = new Set<string>(["DEFAULT"]);
 async function roomExists(room: string): Promise<boolean> {
@@ -102,16 +99,15 @@ async function sbUpload(room: string, id: string, name: string, contentType: str
   if (!row.ok) throw new Error(`db ${row.status}: ${await row.text()}`);
   return publicUrl;
 }
-async function sbCreateRoom(name: string): Promise<{ room: string; dmKey: string }> {
-  const dmKey = genDmKey();
+async function sbCreateRoom(name: string, dmHash: string): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = genRoomCode();
     const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns`, {
       method: "POST",
       headers: { ...sbHeaders, "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({ room: code, name, dm_key: dmKey }),
+      body: JSON.stringify({ room: code, name, dm_key: dmHash }),
     });
-    if (r.ok) { roomExistsCache.add(code); return { room: code, dmKey }; }
+    if (r.ok) { roomExistsCache.add(code); return code; }
     if (r.status !== 409) throw new Error(`create ${r.status}: ${await r.text()}`); // 409 = code clash, retry
   }
   throw new Error("could not allocate room code");
@@ -145,7 +141,7 @@ const server = http.createServer(async (req, res) => {
       let exists = false, name: string | null = null, isDm = false;
       if (supabaseOn) {
         const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?room=eq.${encodeURIComponent(room)}&select=room,name,dm_key`, { headers: sbHeaders });
-        if (r.ok) { const rows = (await r.json()) as any[]; if (rows.length) { exists = true; name = rows[0].name; isDm = !!(dm && rows[0].dm_key && dm === rows[0].dm_key); } }
+        if (r.ok) { const rows = (await r.json()) as any[]; if (rows.length) { exists = true; name = rows[0].name; isDm = !!(dm && rows[0].dm_key && sha256(dm) === rows[0].dm_key); } }
       } else if (room === "DEFAULT") { exists = true; name = "Default"; isDm = true; }
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
       return res.end(JSON.stringify({ exists, name, isDm }));
@@ -157,9 +153,11 @@ const server = http.createServer(async (req, res) => {
       // Creation is OPEN unless an operator lock (ADMIN_PASSWORD) is configured.
       if (ADMIN_PASSWORD && pass !== ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("wrong admin password"); }
       if (!name) { res.writeHead(400, CORS); return res.end("name required"); }
-      const created = await sbCreateRoom(name);
+      const dmpw = url.searchParams.get("dmpw") ?? "";
+      if (dmpw.length < 3) { res.writeHead(400, CORS); return res.end("choose a campaign password (min 3 chars)"); }
+      const room = await sbCreateRoom(name, sha256(dmpw));
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
-      return res.end(JSON.stringify({ ok: true, room: created.room, dmKey: created.dmKey }));
+      return res.end(JSON.stringify({ ok: true, room }));
     }
 
     if (url.pathname === "/campaign.json") {
@@ -292,6 +290,7 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  <details>
   <summary>I'm the Game Master — create a new campaign</summary>
   <label>Campaign name</label><input id="cName" type="text" placeholder="e.g. Curse of Strahd">
+  <label>Campaign password <span style="text-transform:none;font-weight:400;color:#8a82a6">(you use this to be the DM)</span></label><input id="cDmPw" type="password" placeholder="choose a password">
   <label id="cPwLabel" style="display:none">Admin password</label><input id="cPw" type="password" placeholder="admin password (only if your server requires it)" style="display:none">
   <button id="createBtn" class="ghost">Create campaign</button>
   <div id="createMsg" class="hint"></div>
@@ -304,6 +303,10 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 
  <details id="hostBox" style="display:none"><summary>👑 Invite players</summary><div class="hint" id="shareInfo"></div></details>
 
+ <div id="dmUnlock" style="display:none">
+  <button class="switch" id="dmUnlockBtn">👑 I'm the DM</button>
+  <div id="dmPwRow" style="display:none"><input id="dmPw" type="password" placeholder="campaign password"><button id="dmGo" class="ghost">Unlock DM mode</button><div id="dmMsg" class="hint"></div></div>
+ </div>
  <div class="seg" id="dmSeg" style="display:none"><button id="mPlayer" class="on">🎙️ Player</button><button id="mDm">👑 DM</button></div>
 
  <div id="playerPane">
@@ -344,24 +347,34 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  function api(p){return p+(p.indexOf('?')<0?'?':'&')+'room='+encodeURIComponent(room);}
 
  function showJoin(){$('joinView').style.display='block';$('playView').style.display='none';}
-function enter(code,name,isDm){
+function renderShare(){
+   var plink=location.origin+'/?room='+room;
+   $('shareInfo').innerHTML='<b>You are the DM 👑</b> &mdash; players you invite can only control their own character.<br><br><b>Send your players this one link:</b><br><code id="plink">'+plink+'</code> <button id="copyP" class="ghost" style="width:auto;margin-top:8px;padding:6px 14px">Copy link</button><br><span style="color:#8a82a6">(or they enter code <b>'+room+'</b> in the overlay extension)</span>';
+   var cp=$('copyP'); if(cp)cp.onclick=function(){try{navigator.clipboard.writeText(plink);}catch(e){} cp.textContent='Copied!'; setTimeout(function(){cp.textContent='Copy link';},1500);};
+ }
+ function applyDmAccess(isDm){
+   $('dmSeg').style.display=isDm?'flex':'none';
+   $('dmUnlock').style.display=isDm?'none':'block';
+   $('hostBox').style.display=isDm?'block':'none';
+   if(isDm){renderShare();setMode('dm');}else setMode('player');
+ }
+ function enter(code,name,isDm){
    room=code.toUpperCase(); try{localStorage.setItem('dndRoom',room);}catch(e){}
    $('pill').textContent=room;
-   $('dmSeg').style.display = isDm ? 'flex' : 'none';
-   setMode(isDm ? 'dm' : 'player');
-   $('hostBox').style.display = isDm ? 'block' : 'none';
-   if(isDm){
-     var plink=location.origin+'/?room='+room;
-     var dmLink=location.origin+'/?room='+room+(dmKeyVal?('&dm='+dmKeyVal):'');
-     $('shareInfo').innerHTML='<b>You are the DM 👑</b> &mdash; players you invite can only control their own character.<br><br>'+
-       '<b>Send your players this one link:</b><br><code id="plink">'+plink+'</code> <button id="copyP" class="ghost" style="width:auto;margin-top:8px;padding:6px 14px">Copy link</button><br>'+
-       '<span style="color:#8a82a6">(or they enter code <b>'+room+'</b> in the overlay extension)</span>'+
-       '<details style="margin-top:10px"><summary>Use DM on another device?</summary>Open this private link there, and keep it secret:<br><code>'+dmLink+'</code></details>';
-     var cp=$('copyP'); if(cp)cp.onclick=function(){try{navigator.clipboard.writeText(plink);}catch(e){} cp.textContent='Copied!'; setTimeout(function(){cp.textContent='Copy link';},1500);};
-   }
+   applyDmAccess(isDm);
    $('joinView').style.display='none'; $('playView').style.display='block'; loadChars();
  }
- $('joinBtn').onclick=function(){
+ $('dmUnlockBtn').onclick=function(){var r=$('dmPwRow');r.style.display=r.style.display==='none'?'block':'none';};
+ $('dmGo').onclick=function(){
+   var pw=$('dmPw').value,m=$('dmMsg');m.className='hint';
+   if(!pw){m.className='bad';m.textContent='Enter the campaign password.';return;}
+   m.textContent='Checking...';
+   fetch('/room?room='+encodeURIComponent(room)+'&dm='+encodeURIComponent(pw)).then(function(r){return r.json();}).then(function(j){
+     if(j.isDm){try{localStorage.setItem('dndDm_'+room,pw);}catch(e){}m.textContent='';applyDmAccess(true);}
+     else{m.className='bad';m.textContent='Wrong campaign password.';}
+   }).catch(function(){m.className='bad';m.textContent='Could not reach server.';});
+ };
+  $('joinBtn').onclick=function(){
    var code=($('code').value||'').trim().toUpperCase(),m=$('joinMsg');m.className='hint';
    if(!code){m.className='bad';m.textContent='Enter a campaign code.';return;}
    m.textContent='Checking...';
@@ -372,14 +385,15 @@ function enter(code,name,isDm){
    }).catch(function(){m.className='bad';m.textContent='Could not reach server.';});
  };
  $('createBtn').onclick=function(){
-   var name=($('cName').value||'').trim(),pw=$('cPw').value,m=$('createMsg');m.className='hint';
+   var name=($('cName').value||'').trim(),dmpw=($('cDmPw').value||''),pw=$('cPw').value,m=$('createMsg');m.className='hint';
    if(!name){m.className='bad';m.textContent='Enter a campaign name.';return;}
+   if(dmpw.length<3){m.className='bad';m.textContent='Choose a campaign password (min 3 characters).';return;}
    if(adminRequired&&!pw){m.className='bad';m.textContent='This server requires an admin password.';return;}
    m.textContent='Creating...';
-   var prm={name:name}; if(adminRequired)prm.password=pw;
+   var prm={name:name,dmpw:dmpw}; if(adminRequired)prm.password=pw;
    fetch('/create?'+new URLSearchParams(prm),{method:'POST'})
    .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();})
-   .then(function(j){dmKeyVal=j.dmKey||'';try{localStorage.setItem('dndDm_'+j.room,dmKeyVal);}catch(e){}m.className='ok';m.textContent='Created code '+j.room;enter(j.room,name,true);})
+   .then(function(j){try{localStorage.setItem('dndDm_'+j.room,dmpw);}catch(e){}m.className='ok';m.textContent='Created code '+j.room;enter(j.room,name,true);})
    .catch(function(e){m.className='bad';m.textContent='Failed: '+e.message;});
  };
  $('switchBtn').onclick=function(){if(running)stopMic();try{localStorage.removeItem('dndRoom');}catch(e){}room='';showJoin();};
