@@ -12,7 +12,6 @@ function load() {
     joinPw = d.joinPw || "";
     $("code").value = code;
     $("join").value = joinPw;
-    if (document.getElementById("nKind")) document.getElementById("nKind").value = d.dmMode ? "npc" : "pc";
     renderShare();
     if (code) refreshChars();
   });
@@ -56,8 +55,9 @@ function refreshChars() {
   if (!code) { box.innerHTML = '<div class="hint">Set a campaign code above first.</div>'; return; }
   fetch(base + "/campaign.json?room=" + enc(code), { cache: "no-store" })
     .then((r) => r.json()).then((c) => {
-      const chars = (c && c.characters) || {}, ids = Object.keys(chars);
-      box.innerHTML = ids.length ? "" : '<div class="hint">No characters yet — add one below.</div>';
+      const chars = (c && c.characters) || {};
+      const ids = Object.keys(chars).filter((id) => (chars[id].kind || "pc") === "npc");
+      box.innerHTML = ids.length ? "" : '<div class="hint">No NPCs yet — add one below.</div>';
       ids.forEach((id) => {
         const d = document.createElement("div"); d.className = "ch";
         const img = document.createElement("img");
@@ -76,8 +76,7 @@ $("addBtn").onclick = () => {
   if (!name) return setMsg(m, "Enter a character name.", false);
   if (!f) return setMsg(m, "Choose an image.", false);
   setMsg(m, "Uploading...", true);
-  const kind = ($("nKind") && $("nKind").value === "npc") ? "npc" : "pc";
-  const url = base + "/admin/upload?room=" + enc(code) + "&" + new URLSearchParams({ name, type: f.type || "image/png", kind }) + (joinPw ? "&join=" + enc(joinPw) : "");
+  const url = base + "/admin/upload?room=" + enc(code) + "&" + new URLSearchParams({ name, type: f.type || "image/png", kind: "npc" }) + (joinPw ? "&join=" + enc(joinPw) : "");
   fetch(url, { method: "POST", body: f })
     .then((r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t); }))
     .then(() => { setMsg(m, "✓ Saved.", true); $("nName").value = ""; $("nFile").value = ""; $("prev").style.display = "none"; refreshChars(); })

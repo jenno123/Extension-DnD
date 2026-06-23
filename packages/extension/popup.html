@@ -1,11 +1,12 @@
 <!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
  body{width:300px;margin:0;padding:14px 16px;font-family:"Segoe UI",system-ui,sans-serif;color:#1d1d1f}
- h1{font-size:15px;margin:0 0 10px}
+ h1{font-size:15px;margin:0 0 4px}.tag{font-size:11px;color:#888;margin:0 0 10px}
  label{font-size:12px;color:#555;display:block;margin:10px 0 4px;font-weight:600}
  input,select{width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccc;border-radius:7px;font-size:13px}
  button{padding:8px;border:0;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700}
  .primary{background:#5865F2;color:#fff;width:100%}.ghost{background:#eee;color:#333}.danger{background:#c0392b;color:#fff}
+ .big{padding:14px;font-size:14px}
  .row{display:flex;gap:8px;margin-top:10px}
  .dm{display:flex;align-items:center;gap:7px;margin-top:12px;font-size:13px;cursor:pointer}.dm input{width:auto}
  .card{border:1px solid #eee;border-radius:9px;padding:10px;margin-top:12px;background:#fafafa}
@@ -14,33 +15,57 @@
  .hint{font-size:11px;color:#888;line-height:1.4;margin-top:6px}
  img#pcPrev{max-width:90px;border-radius:7px;margin-top:6px;display:none}
  details{margin-top:10px}summary{font-size:12px;color:#666;cursor:pointer}
+ .codebox{background:#1b1530;color:#e4c478;border-radius:8px;padding:10px;margin-top:6px;font-weight:800;font-size:16px;letter-spacing:1px;display:flex;justify-content:space-between;align-items:center}
+ .codebox button{background:#e4c478;color:#231a06;font-size:11px;padding:5px 9px}
+ .back{font-size:11px;color:#5865F2;cursor:pointer;text-decoration:underline;display:inline-block;margin-top:10px}
 </style></head><body>
  <h1>🎭 D&amp;D Voice Overlay</h1>
+ <div class="tag">Your character lights up on Roll20 when you talk.</div>
 
- <label>Campaign code</label><input id="code" placeholder="RAVEN7" style="text-transform:uppercase">
- <label>Join password (if your campaign has one)</label><input id="join" type="password" placeholder="leave blank if none">
- <div class="row"><button class="primary" id="save">Save</button><button class="ghost" id="test" style="flex:0 0 72px">Test</button></div>
- <div id="status"></div>
-
- <label class="dm"><input type="checkbox" id="dm"> 👑 I'm the DM</label>
-
- <div id="playerCard" class="card">
-   <div id="myCharBox"></div>
-   <label>Your character — name</label><input id="pcName" placeholder="e.g. Medvind">
-   <label>Portrait image (transparent PNG looks best)</label><input id="pcFile" type="file" accept="image/*">
-   <img id="pcPrev">
-   <button class="primary" id="pcSave" style="margin-top:10px">Save my character</button>
-   <div id="pcMsg" class="msg"></div>
+ <!-- First-run role choice -->
+ <div id="welcome">
+   <p style="font-size:13px;color:#444;margin:6px 0 12px">Welcome! Are you joining a game, or running one?</p>
+   <button class="primary big" id="bePlayer">🎙️ I'm a player — join a game</button>
+   <button class="ghost big" id="beDm" style="width:100%;margin-top:10px">👑 I'm the DM — create a campaign</button>
  </div>
 
- <div id="dmCard" class="card" style="display:none">
-   <button class="primary" id="console">Open DM campaign console</button>
-   <div class="hint">Create your campaign and add / delete your NPCs in the console.</div>
+ <!-- Main -->
+ <div id="main" style="display:none">
+   <label>Campaign code</label><input id="code" placeholder="RAVEN7" style="text-transform:uppercase">
+   <label>Join password (if your campaign has one)</label><input id="join" type="password" placeholder="leave blank if none">
+   <div class="row"><button class="primary" id="save">Save</button><button class="ghost" id="test" style="flex:0 0 72px">Test</button></div>
+   <div id="status"></div>
+
+   <label class="dm"><input type="checkbox" id="dm"> 👑 I'm the DM</label>
+
+   <!-- Player -->
+   <div id="playerCard" class="card">
+     <div id="myCharBox"></div>
+     <label>Your character — name</label><input id="pcName" placeholder="e.g. Medvind">
+     <label>Portrait image (transparent PNG looks best)</label><input id="pcFile" type="file" accept="image/*">
+     <img id="pcPrev">
+     <button class="primary" id="pcSave" style="margin-top:10px">Save my character</button>
+     <div id="pcMsg" class="msg"></div>
+     <div class="hint">Don't have a code? Ask your DM for the campaign code.</div>
+   </div>
+
+   <!-- DM -->
+   <div id="dmCard" class="card" style="display:none">
+     <div id="codeDisplay"></div>
+     <details id="createWrap"><summary>Create a new campaign</summary>
+       <label>Campaign name</label><input id="dmName" placeholder="e.g. Curse of Strahd">
+       <label>Join password (optional)</label><input id="dmJoin" type="password" placeholder="leave blank for open">
+       <button class="primary" id="dmCreate" style="margin-top:10px">Create campaign</button>
+       <div id="dmMsg" class="msg"></div>
+     </details>
+     <button class="ghost" id="console" style="width:100%;margin-top:10px">Manage NPCs (console)</button>
+   </div>
+
+   <button class="ghost" id="pause" style="width:100%;margin-top:12px">⏸ Pause / Resume my overlay</button>
+   <div class="hint">Shortcut: <b>Ctrl+Shift+P</b> — pauses only your screen.</div>
+   <span class="back" id="back">← change role</span>
+
+   <details><summary>Advanced</summary><label>Relay base URL</label><input id="url" placeholder="https://..."></details>
  </div>
-
- <button class="ghost" id="pause" style="width:100%;margin-top:12px">⏸ Pause / Resume my overlay</button>
- <div class="hint">Shortcut: <b>Ctrl+Shift+P</b> — pauses only your screen.</div>
-
- <details><summary>Advanced</summary><label>Relay base URL</label><input id="url" placeholder="https://..."></details>
  <script src="popup.js"></script>
 </body></html>

@@ -29,6 +29,8 @@
   let campaignChars = {}, relayBase = "";
   let strip = null, repWs = null, repAc = null, repSp = null, repStream = null;
   let repRunning = false, repSpeaking = false, repLastLoud = 0, activeId = "", dmIds = [];
+  let stripStatusEl = null, stripMeterEl = null, meterRaf = null, lastLevel = 0;
+  const MIC_HELP = "Microphone is blocked for Roll20.\n\nClick the icon at the left of the address bar, set Microphone to Allow, then reload this tab.";
 
   const log = (...a) => console.log("[dnd-overlay]", ...a);
 
@@ -155,7 +157,7 @@
     const url = toWsUrl(base);
     log("connecting", url);
     socket = new WebSocket(url);
-    socket.onopen = () => { reconnectMs = 1000; setConnected(true); log("relay connected"); };
+    socket.onopen = () => { reconnectMs = 1000; setConnected(true); updateLiveStatus(); log("relay connected"); };
     socket.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
@@ -205,6 +207,28 @@
 
   // ===== Bottom control strip (players: pick char + mic + pause; DM: board) =====
   function portraitUrl(c){ return /^https?:\/\//i.test(c.portrait) ? c.portrait : `${relayBase}/portraits/${encodeURIComponent(c.portrait)}?room=${encodeURIComponent(room)}`; }
+  function setStripStatus(text, cls, help) {
+    if (!stripStatusEl) return;
+    stripStatusEl.textContent = text;
+    stripStatusEl.className = "dnd-strip-status" + (cls ? " " + cls : "");
+    if (help) stripStatusEl.dataset.help = "1"; else delete stripStatusEl.dataset.help;
+  }
+  function updateLiveStatus() {
+    if (!stripStatusEl) return;
+    if (Object.keys(campaignChars).length === 0) { setStripStatus("Campaign empty or wrong code", "err"); return; }
+    if (!repRunning) {
+      if (!dmMode && !(myChar && campaignChars[myChar])) { setStripStatus("Add your character in the popup", "off"); return; }
+      setStripStatus("Mic off \u2014 click \uD83C\uDFA4 to go live", "off"); return;
+    }
+    if (repSpeaking) { const nm = (campaignChars[activeId] && campaignChars[activeId].name) || activeId; setStripStatus("\uD83D\uDD0A Live as " + nm, "live"); }
+    else setStripStatus("Listening\u2026", "ok");
+  }
+  function testFlash() {
+    const id = activeId || (myChar && campaignChars[myChar] ? myChar : (dmIds[0] || ""));
+    if (!id) { setStripStatus("Pick a character first", "err"); return; }
+    showSpeaker(id); setTimeout(() => hideSpeaker(id), 1800);
+  }
+  function meterTick() { if (!strip) { meterRaf = null; return; } if (stripMeterEl) stripMeterEl.style.width = ((repRunning ? lastLevel : 0) * 100).toFixed(0) + "%"; meterRaf = requestAnimationFrame(meterTick); }
   function repWsUrl() {
     return relayBase.replace(/^http/i, "ws") + "/?role=reporter&room=" + encodeURIComponent(room) +
       (joinPw ? "&join=" + encodeURIComponent(joinPw) : "");
@@ -217,6 +241,7 @@
     repSpeaking = on;
     reporterSend(activeId, on);
     if (strip) strip.classList.toggle("speaking", on);
+    updateLiveStatus();
   }
   function highlightStrip() {
     if (!strip) return;
@@ -289,7 +314,7 @@
     document.documentElement.appendChild(strip);
     if (dmMode && dmIds.length) setActive(dmIds.indexOf(activeId) >= 0 ? activeId : dmIds[0]);
   }
-  function teardownStrip() { if (strip) { strip.remove(); strip = null; } }
+  function teardownStrip() { if (meterRaf) { cancelAnimationFrame(meterRaf); meterRaf = null; } if (strip) { strip.remove(); strip = null; } stripStatusEl = null; stripMeterEl = null; }
 
   function connectReporter() {
     repWs = new WebSocket(repWsUrl());
@@ -301,6 +326,7 @@
     const d = e.inputBuffer.getChannelData(0); let s = 0;
     for (let i = 0; i < d.length; i++) s += d[i] * d[i];
     const level = Math.min(1, Math.sqrt(s / d.length) * 4);
+    lastLevel = level;
     const thr = dmSens / 100, now = Date.now();
     if (level > thr) { repLastLoud = now; if (!repSpeaking) setRepSpeaking(true); }
     else if (repSpeaking && now - repLastLoud > dmHold) setRepSpeaking(false);
@@ -322,8 +348,9 @@
         connectReporter();
         repRunning = true; repLastLoud = Date.now();
         if (strip) strip.classList.add("mic-on");
+        updateLiveStatus();
         log("mic on");
-      }).catch((e) => log("mic denied:", e.message));
+      }).catch((e) => { setStripStatus("\uD83C\uDFA4 Mic blocked \u2014 click to fix", "err", true); log("mic denied:", e.message); });
   }
   function stopMic() {
     repRunning = false; setRepSpeaking(false);
@@ -332,6 +359,7 @@
     if (repAc) { try { repAc.close(); } catch (_) {} repAc = null; }
     if (repWs) { try { repWs.close(); } catch (_) {} repWs = null; }
     if (strip) strip.classList.remove("mic-on");
+    updateLiveStatus();
     log("mic off");
   }
   function initStrip() { buildStrip(); }

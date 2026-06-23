@@ -7,17 +7,30 @@ function normalize(raw){ let b=(raw||"").trim().replace(/\/+$/,""); if(b&&!/^htt
 function relay(){ return normalize($("url").value) || DEFAULT_RELAY_URL; }
 function curCode(){ return ($("code").value||"").trim().toUpperCase(); }
 function setStatus(el,msg,ok){ el.textContent=msg; el.className=(el.id==="status"?"":"msg ")+(ok?"ok":"bad"); }
-function applyRole(){ const dm=$("dm").checked; $("playerCard").style.display=dm?"none":"block"; $("dmCard").style.display=dm?"block":"none"; }
+function applyRole(){ const dm=$("dm").checked; $("playerCard").style.display=dm?"none":"block"; $("dmCard").style.display=dm?"block":"none"; if(dm)renderCode(); }
+
+function showWelcome(){ $("welcome").style.display="block"; $("main").style.display="none"; }
+function showMain(isDm){ $("welcome").style.display="none"; $("main").style.display="block"; $("dm").checked=!!isDm; applyRole(); if(isDm){ if(!curCode())$("createWrap").open=true; } else { renderMyChar(); $("code").focus(); } }
 
 function load(){
   chrome.storage.local.get(["relayBaseUrl","campaignCode","joinPw","dmMode","myCharacterId"],(d)=>{
     base = d.relayBaseUrl || DEFAULT_RELAY_URL;
     code = (d.campaignCode||"").toUpperCase();
-    joinPw = d.joinPw || "";
-    myChar = d.myCharacterId || "";
+    joinPw = d.joinPw || ""; myChar = d.myCharacterId || "";
     $("url").value = base; $("code").value = code; $("join").value = joinPw; $("dm").checked = !!d.dmMode;
-    applyRole(); renderMyChar();
+    if (code) { showMain(!!d.dmMode); } else { showWelcome(); }
   });
+}
+
+$("bePlayer").onclick=()=>{ chrome.storage.local.set({dmMode:false}); showMain(false); };
+$("beDm").onclick=()=>{ chrome.storage.local.set({dmMode:true}); showMain(true); };
+$("back").onclick=showWelcome;
+
+function renderCode(){
+  const box=$("codeDisplay"); code=curCode();
+  if(!code){ box.innerHTML='<div class="hint">No campaign yet — create one below, or enter a code above.</div>'; return; }
+  box.innerHTML='<div class="hint" style="margin:0 0 4px">Share this code with your players:</div><div class="codebox"><span>'+code+'</span><button id="copyCode">Copy</button></div>';
+  $("copyCode").onclick=()=>{ try{navigator.clipboard.writeText(code);}catch(e){} $("copyCode").textContent="Copied!"; setTimeout(()=>{$("copyCode").textContent="Copy";},1200); };
 }
 
 function renderMyChar(){
@@ -46,7 +59,7 @@ $("pcSave").onclick=()=>{
   if(!name) return setStatus(m,"Enter your character name.",false);
   if(!f) return setStatus(m,"Choose a portrait image.",false);
   setStatus(m,"Uploading...",true);
-  chrome.storage.local.set({campaignCode:code,joinPw}); // make sure the overlay uses this campaign
+  chrome.storage.local.set({campaignCode:code,joinPw});
   const url=relay()+"/admin/upload?room="+enc(code)+"&"+new URLSearchParams({name,type:f.type||"image/png",kind:"pc"})+(joinPw?"&join="+enc(joinPw):"");
   fetch(url,{method:"POST",body:f}).then(r=>r.ok?r.json():r.text().then(t=>{throw new Error(t);})).then(j=>{
     const oldId=myChar; myChar=j.id; chrome.storage.local.set({myCharacterId:myChar});
@@ -62,12 +75,25 @@ function removeMyChar(){
     .then(()=>{ myChar=""; chrome.storage.local.set({myCharacterId:""}); renderMyChar(); }).catch(()=>{});
 }
 
-$("dm").onchange=applyRole;
+$("dmCreate").onclick=()=>{
+  const name=$("dmName").value.trim(), jp=$("dmJoin").value, m=$("dmMsg");
+  if(!name) return setStatus(m,"Enter a campaign name.",false);
+  setStatus(m,"Creating...",true);
+  const prm={name}; if(jp)prm.joinpw=jp;
+  fetch(relay()+"/create?"+new URLSearchParams(prm),{method:"POST"}).then(r=>r.ok?r.json():r.text().then(t=>{throw new Error(t);})).then(j=>{
+    code=j.room; joinPw=jp||"";
+    chrome.storage.local.set({campaignCode:code,joinPw,dmMode:true});
+    $("code").value=code; $("join").value=joinPw;
+    setStatus(m,"✓ Campaign "+code+" created.",true); $("createWrap").open=false; renderCode();
+  }).catch(e=>setStatus(m,"Failed: "+e.message,false));
+};
 
+$("dm").onchange=applyRole;
 $("save").onclick=()=>{
   const b=relay(); code=curCode(); joinPw=$("join").value||"";
   chrome.storage.local.set({relayBaseUrl:b,campaignCode:code,joinPw,dmMode:$("dm").checked},()=>{
-    base=b; setStatus($("status"),code?("Saved. Campaign "+code+($("dm").checked?" (DM)":"")):"Saved.",true); renderMyChar();
+    base=b; setStatus($("status"),code?("Saved. Campaign "+code+($("dm").checked?" (DM)":"")):"Saved.",true);
+    if($("dm").checked)renderCode(); else renderMyChar();
   });
 };
 $("test").onclick=()=>{ setStatus($("status"),"Testing...",true); fetch(relay()+"/health",{cache:"no-store"}).then(r=>r.json()).then(j=>setStatus($("status"),"Relay OK ("+(j.mode||"ok")+").",true)).catch(()=>setStatus($("status"),"Could not reach relay.",false)); };

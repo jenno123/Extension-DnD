@@ -163,3 +163,12 @@
 
 #dnd-dm-strip .dnd-player-name { color: #f4ecd2; font-weight: 800; font-size: 14px; padding: 0 6px; white-space: nowrap; }
 #dnd-dm-strip .dnd-player-name.muted { color: #a99fc4; font-weight: 600; font-size: 12px; }
+
+#dnd-dm-strip .dnd-strip-status { font-size:12px; font-weight:700; color:#a99fc4; padding:0 6px; white-space:nowrap; }
+#dnd-dm-strip .dnd-strip-status.ok { color:#cdbfe6; }
+#dnd-dm-strip .dnd-strip-status.live { color:#8ee6a0; }
+#dnd-dm-strip .dnd-strip-status.off { color:#a99fc4; }
+#dnd-dm-strip .dnd-strip-status.err { color:#ff9a8f; cursor:pointer; text-decoration:underline; }
+#dnd-dm-strip .dnd-strip-meter { width:56px; height:8px; background:#150f24; border:1px solid var(--line,rgba(228,196,120,.22)); border-radius:5px; overflow:hidden; flex:0 0 auto; }
+#dnd-dm-strip .dnd-strip-meter-fill { height:100%; width:0%; background:linear-gradient(90deg,#7bd88f,#2ecc71); }
+#dnd-dm-strip .dnd-strip-test { width:auto; padding:7px 12px; border-radius:10px; border:1px solid rgba(228,196,120,.4); background:#251c3c; color:#f4ecd2; font-size:12px; font-weight:700; flex:0 0 auto; cursor:pointer; }
