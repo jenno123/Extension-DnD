@@ -77,6 +77,15 @@ async function roomExists(room: string): Promise<boolean> {
   if (rows.length) { roomExistsCache.add(room); return true; }
   return false;
 }
+interface Campaign { exists: boolean; name?: string | null; joinHash?: string | null; dmHash?: string | null; }
+async function sbGetCampaign(room: string): Promise<Campaign> {
+  if (!supabaseOn) return room === "DEFAULT" ? { exists: true, name: "Default", joinHash: null, dmHash: null } : { exists: false };
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?room=eq.${encodeURIComponent(room)}&select=room,name,join_hash,dm_key`, { headers: sbHeaders });
+  if (!r.ok) return { exists: false };
+  const rows = (await r.json()) as any[];
+  if (!rows.length) return { exists: false };
+  return { exists: true, name: rows[0].name, joinHash: rows[0].join_hash ?? null, dmHash: rows[0].dm_key ?? null };
+}
 async function sbListCharacters(room: string): Promise<Array<{ char_id: string; name: string; portrait_url: string }>> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/characters?room=eq.${encodeURIComponent(room)}&select=char_id,name,portrait_url&order=name`, { headers: sbHeaders });
   if (!r.ok) throw new Error(`list ${r.status}`);
@@ -99,13 +108,13 @@ async function sbUpload(room: string, id: string, name: string, contentType: str
   if (!row.ok) throw new Error(`db ${row.status}: ${await row.text()}`);
   return publicUrl;
 }
-async function sbCreateRoom(name: string, dmHash: string): Promise<string> {
+async function sbCreateRoom(name: string, dmHash: string, joinHash: string | null): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = genRoomCode();
     const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns`, {
       method: "POST",
       headers: { ...sbHeaders, "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({ room: code, name, dm_key: dmHash }),
+      body: JSON.stringify({ room: code, name, dm_key: dmHash, join_hash: joinHash }),
     });
     if (r.ok) { roomExistsCache.add(code); return code; }
     if (r.status !== 409) throw new Error(`create ${r.status}: ${await r.text()}`); // 409 = code clash, retry
@@ -138,13 +147,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/room") {
       const room = roomOf(url);
       const dm = url.searchParams.get("dm") ?? "";
-      let exists = false, name: string | null = null, isDm = false;
-      if (supabaseOn) {
-        const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?room=eq.${encodeURIComponent(room)}&select=room,name,dm_key`, { headers: sbHeaders });
-        if (r.ok) { const rows = (await r.json()) as any[]; if (rows.length) { exists = true; name = rows[0].name; isDm = !!(dm && rows[0].dm_key && sha256(dm) === rows[0].dm_key); } }
-      } else if (room === "DEFAULT") { exists = true; name = "Default"; isDm = true; }
+      const join = url.searchParams.get("join") ?? "";
+      const camp = await sbGetCampaign(room);
+      const isDm = !!(dm && camp.dmHash && sha256(dm) === camp.dmHash);
+      const joinRequired = !!camp.joinHash;
+      const joinOk = !camp.joinHash || (!!join && sha256(join) === camp.joinHash);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
-      return res.end(JSON.stringify({ exists, name, isDm }));
+      return res.end(JSON.stringify({ exists: camp.exists, name: camp.name ?? null, isDm, joinRequired, joinOk }));
     }
     if (url.pathname === "/create" && req.method === "POST") {
       if (!supabaseOn) { res.writeHead(503, CORS); return res.end("not configured"); }
@@ -155,7 +164,9 @@ const server = http.createServer(async (req, res) => {
       if (!name) { res.writeHead(400, CORS); return res.end("name required"); }
       const dmpw = url.searchParams.get("dmpw") ?? "";
       if (dmpw.length < 3) { res.writeHead(400, CORS); return res.end("choose a campaign password (min 3 chars)"); }
-      const room = await sbCreateRoom(name, sha256(dmpw));
+      const joinpw = url.searchParams.get("joinpw") ?? "";
+      const joinHash = joinpw ? sha256(joinpw) : null;
+      const room = await sbCreateRoom(name, sha256(dmpw), joinHash);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
       return res.end(JSON.stringify({ ok: true, room }));
     }
@@ -174,7 +185,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/admin/upload" && req.method === "POST") {
       if (!supabaseOn) { res.writeHead(503, CORS); return res.end("uploads not configured"); }
       const room = roomOf(url);
-      if (!(await roomExists(room))) { res.writeHead(404, CORS); return res.end("unknown campaign code"); }
+      const camp = await sbGetCampaign(room);
+      if (!camp.exists) { res.writeHead(404, CORS); return res.end("unknown campaign code"); }
+      if (camp.joinHash && sha256(url.searchParams.get("join") ?? "") !== camp.joinHash) { res.writeHead(401, CORS); return res.end("join password required"); }
       const rawId = (url.searchParams.get("id") ?? "").trim();
       const name = (url.searchParams.get("name") ?? "").trim();
       const type = url.searchParams.get("type") ?? "image/png";
@@ -214,7 +227,8 @@ wss.on("connection", async (ws, req) => {
   const code = roomOf(url);
   const role = url.searchParams.get("role") ?? "display";
 
-  if (!(await roomExists(code))) { return ws.close(1008, "unknown room"); }
+  const camp = await sbGetCampaign(code);
+  if (!camp.exists) { return ws.close(1008, "unknown room"); }
   const room = getRoom(code);
 
   if (role === "source") {
@@ -223,6 +237,7 @@ wss.on("connection", async (ws, req) => {
     return;
   }
   if (role === "reporter") {
+    if (camp.joinHash && sha256(url.searchParams.get("join") ?? "") !== camp.joinHash) return ws.close(1008, "join password required");
     ws.on("message", (b) => onSpeaking(room, b));
     return;
   }
@@ -285,12 +300,14 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  <p class="sub">Your character lights up on Roll20 when you talk — your own mic, no Discord.</p>
  <label>Campaign code</label>
  <input id="code" type="text" placeholder="e.g. RAVEN7" style="text-transform:uppercase">
+ <div id="joinPwRow" style="display:none"><label>Campaign join password</label><input id="joinPw" type="password" placeholder="password from your host"></div>
  <button id="joinBtn">Join campaign</button>
  <div id="joinMsg" class="hint"></div>
  <details>
   <summary>I'm the Game Master — create a new campaign</summary>
   <label>Campaign name</label><input id="cName" type="text" placeholder="e.g. Curse of Strahd">
   <label>Campaign password <span style="text-transform:none;font-weight:400;color:#8a82a6">(you use this to be the DM)</span></label><input id="cDmPw" type="password" placeholder="choose a password">
+  <label>Join password <span style="text-transform:none;font-weight:400;color:#8a82a6">(optional &mdash; leave blank for open join)</span></label><input id="cJoinPw" type="password" placeholder="optional">
   <label id="cPwLabel" style="display:none">Admin password</label><input id="cPw" type="password" placeholder="admin password (only if your server requires it)" style="display:none">
   <button id="createBtn" class="ghost">Create campaign</button>
   <div id="createMsg" class="hint"></div>
@@ -337,14 +354,14 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 </div><script>
 (function(){
  var $=function(i){return document.getElementById(i);};
- var room='', mode='player', dmActive='', boardIds=[], chars={}, adminRequired=false, dmKeyVal='';
+ var room='', mode='player', dmActive='', boardIds=[], chars={}, adminRequired=false, dmKeyVal='', joinPwVal='';
  fetch('/health').then(function(r){return r.json();}).then(function(j){
    adminRequired=!!j.admin;
    if(adminRequired){$('cPwLabel').style.display='block';$('cPw').style.display='block';}
  }).catch(function(){});
  var ws=null,ac=null,an=null,stream=null,raf=null,running=false,speaking=false,stopTimer=null;
  var state=$('state'),meter=$('meter');
- function api(p){return p+(p.indexOf('?')<0?'?':'&')+'room='+encodeURIComponent(room);}
+ function api(p){return p+(p.indexOf('?')<0?'?':'&')+'room='+encodeURIComponent(room)+(joinPwVal?('&join='+encodeURIComponent(joinPwVal)):'');}
 
  function showJoin(){$('joinView').style.display='block';$('playView').style.display='none';}
 function renderShare(){
@@ -379,21 +396,30 @@ function renderShare(){
    if(!code){m.className='bad';m.textContent='Enter a campaign code.';return;}
    m.textContent='Checking...';
    var dk=''; try{dk=localStorage.getItem('dndDm_'+code)||'';}catch(e){}
+   var jp=$('joinPw').value||''; if(!jp){try{jp=localStorage.getItem('dndJoin_'+code)||'';}catch(e){}}
    dmKeyVal=dk;
-   fetch('/room?room='+encodeURIComponent(code)+(dk?('&dm='+encodeURIComponent(dk)):'')).then(function(r){return r.json();}).then(function(j){
-     if(j.exists){m.textContent='';enter(code,j.name,!!j.isDm);}else{m.className='bad';m.textContent='No campaign with that code.';}
+   var q='/room?room='+encodeURIComponent(code)+(dk?('&dm='+encodeURIComponent(dk)):'')+(jp?('&join='+encodeURIComponent(jp)):'');
+   fetch(q).then(function(r){return r.json();}).then(function(j){
+     if(!j.exists){m.className='bad';m.textContent='No campaign with that code.';return;}
+     if(j.joinRequired&&!j.joinOk){
+       $('joinPwRow').style.display='block';
+       m.className=jp?'bad':'hint'; m.textContent=jp?'Wrong join password.':'This campaign needs a join password.';
+       return;
+     }
+     joinPwVal=jp; if(jp){try{localStorage.setItem('dndJoin_'+code,jp);}catch(e){}}
+     m.textContent=''; enter(code,j.name,!!j.isDm);
    }).catch(function(){m.className='bad';m.textContent='Could not reach server.';});
  };
  $('createBtn').onclick=function(){
-   var name=($('cName').value||'').trim(),dmpw=($('cDmPw').value||''),pw=$('cPw').value,m=$('createMsg');m.className='hint';
+   var name=($('cName').value||'').trim(),dmpw=($('cDmPw').value||''),joinpw=($('cJoinPw').value||''),pw=$('cPw').value,m=$('createMsg');m.className='hint';
    if(!name){m.className='bad';m.textContent='Enter a campaign name.';return;}
    if(dmpw.length<3){m.className='bad';m.textContent='Choose a campaign password (min 3 characters).';return;}
    if(adminRequired&&!pw){m.className='bad';m.textContent='This server requires an admin password.';return;}
    m.textContent='Creating...';
-   var prm={name:name,dmpw:dmpw}; if(adminRequired)prm.password=pw;
+   var prm={name:name,dmpw:dmpw}; if(joinpw)prm.joinpw=joinpw; if(adminRequired)prm.password=pw;
    fetch('/create?'+new URLSearchParams(prm),{method:'POST'})
    .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();})
-   .then(function(j){try{localStorage.setItem('dndDm_'+j.room,dmpw);}catch(e){}m.className='ok';m.textContent='Created code '+j.room;enter(j.room,name,true);})
+   .then(function(j){try{localStorage.setItem('dndDm_'+j.room,dmpw);if(joinpw)localStorage.setItem('dndJoin_'+j.room,joinpw);}catch(e){}joinPwVal=joinpw;m.className='ok';m.textContent='Created code '+j.room;enter(j.room,name,true);})
    .catch(function(e){m.className='bad';m.textContent='Failed: '+e.message;});
  };
  $('switchBtn').onclick=function(){if(running)stopMic();try{localStorage.removeItem('dndRoom');}catch(e){}room='';showJoin();};
@@ -454,7 +480,7 @@ function renderShare(){
  };
 
  function curId(){return mode==='dm'?dmActive:$('char').value;}
- function wsUrl(){var p=location.protocol==='https:'?'wss://':'ws://';return p+location.host+'/?role=reporter&room='+encodeURIComponent(room);}
+ function wsUrl(){var p=location.protocol==='https:'?'wss://':'ws://';return p+location.host+'/?role=reporter&room='+encodeURIComponent(room)+(joinPwVal?('&join='+encodeURIComponent(joinPwVal)):'');}
  function rawSend(id,on){if(ws&&ws.readyState===1&&id)ws.send(JSON.stringify({type:'speaking',userId:id,speaking:on}));}
  function setSpeaking(on){if(on===speaking)return;speaking=on;rawSend(curId(),on);state.className=on?'live':'idle';state.textContent=on?'🔊 Speaking - portrait is lit':'Listening...';}
  function loop(){if(!running)return;var b=new Uint8Array(an.fftSize);an.getByteTimeDomainData(b);var s=0;for(var i=0;i<b.length;i++){var x=(b[i]-128)/128;s+=x*x;}
@@ -483,8 +509,14 @@ function renderShare(){
  var initial=urlRoom||saved;
  if(initial){
    var dk=urlDm; if(!dk){try{dk=localStorage.getItem('dndDm_'+initial)||'';}catch(e){}}
+   var jp=params.get('join')||''; if(!jp){try{jp=localStorage.getItem('dndJoin_'+initial)||'';}catch(e){}}
    dmKeyVal=dk||''; if(dk){try{localStorage.setItem('dndDm_'+initial,dk);}catch(e){}}
-   fetch('/room?room='+encodeURIComponent(initial)+(dk?('&dm='+encodeURIComponent(dk)):'')).then(function(r){return r.json();}).then(function(j){if(j.exists)enter(initial,j.name,!!j.isDm);else showJoin();}).catch(showJoin);
+   var q='/room?room='+encodeURIComponent(initial)+(dk?('&dm='+encodeURIComponent(dk)):'')+(jp?('&join='+encodeURIComponent(jp)):'');
+   fetch(q).then(function(r){return r.json();}).then(function(j){
+     if(!j.exists){showJoin();return;}
+     if(j.joinRequired&&!j.joinOk){ $('code').value=initial; $('joinPwRow').style.display='block'; showJoin(); return; }
+     joinPwVal=jp||''; enter(initial,j.name,!!j.isDm);
+   }).catch(showJoin);
  } else showJoin();
 })();
 </script></body></html>`;
