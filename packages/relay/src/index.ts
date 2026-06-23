@@ -350,7 +350,7 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
    adminRequired=!!j.admin;
    if(adminRequired){$('cPwLabel').style.display='block';$('cPw').style.display='block';}
  }).catch(function(){});
- var ws=null,ac=null,an=null,stream=null,raf=null,running=false,speaking=false,stopTimer=null;
+ var ws=null,ac=null,an=null,sp=null,stream=null,raf=null,running=false,speaking=false,stopTimer=null,lastLevel=0,lastLoud=0;
  var state=$('state'),meter=$('meter');
  function api(p){return p+(p.indexOf('?')<0?'?':'&')+'room='+encodeURIComponent(room)+(joinPwVal?('&join='+encodeURIComponent(joinPwVal)):'');}
 
@@ -459,22 +459,30 @@ function renderShare(){
  function wsUrl(){var p=location.protocol==='https:'?'wss://':'ws://';return p+location.host+'/?role=reporter&room='+encodeURIComponent(room)+(joinPwVal?('&join='+encodeURIComponent(joinPwVal)):'');}
  function rawSend(id,on){if(ws&&ws.readyState===1&&id)ws.send(JSON.stringify({type:'speaking',userId:id,speaking:on}));}
  function setSpeaking(on){if(on===speaking)return;speaking=on;rawSend(curId(),on);state.className=on?'live':'idle';state.textContent=on?'🔊 Speaking - portrait is lit':'Listening...';}
- function loop(){if(!running)return;var b=new Uint8Array(an.fftSize);an.getByteTimeDomainData(b);var s=0;for(var i=0;i<b.length;i++){var x=(b[i]-128)/128;s+=x*x;}
-   var level=Math.min(1,Math.sqrt(s/b.length)*4);meter.style.width=(level*100).toFixed(0)+'%';
-   var thr=parseInt($('sens').value,10)/100,hold=Math.max(200,parseInt($('holdNum').value,10)||1200);
-   if(level>thr){if(stopTimer){clearTimeout(stopTimer);stopTimer=null;}setSpeaking(true);}
-   else if(speaking&&!stopTimer){stopTimer=setTimeout(function(){stopTimer=null;setSpeaking(false);},hold);}
-   raf=requestAnimationFrame(loop);}
+ // Visual meter only (may pause when tab is hidden - that's fine).
+ function meterLoop(){if(!running)return;meter.style.width=(lastLevel*100).toFixed(0)+'%';raf=requestAnimationFrame(meterLoop);}
+ // Voice detection runs on the AUDIO thread via a ScriptProcessor, so it keeps
+ // working even when this tab is in the background.
+ function onAudio(e){
+   if(!running)return;
+   var d=e.inputBuffer.getChannelData(0),s=0;for(var i=0;i<d.length;i++)s+=d[i]*d[i];
+   var level=Math.min(1,Math.sqrt(s/d.length)*4);lastLevel=level;
+   var thr=parseInt($('sens').value,10)/100,hold=Math.max(200,parseInt($('holdNum').value,10)||1200),now=Date.now();
+   if(level>thr){lastLoud=now;if(!speaking)setSpeaking(true);}
+   else if(speaking&&now-lastLoud>hold){setSpeaking(false);}
+ }
  function startMic(){
    if(mode==='player'&&!$('char').value){state.className='bad';state.textContent='Pick your character first.';return;}
    if(mode==='dm'&&!dmActive){state.className='bad';state.textContent='Tap a character first.';return;}
    navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false}).then(function(st){
-     stream=st;ac=new (window.AudioContext||window.webkitAudioContext)();var sn=ac.createMediaStreamSource(st);an=ac.createAnalyser();an.fftSize=512;sn.connect(an);
-     ws=new WebSocket(wsUrl());ws.onopen=function(){running=true;state.className='idle';state.textContent='Listening...';loop();};
+     stream=st;ac=new (window.AudioContext||window.webkitAudioContext)();var sn=ac.createMediaStreamSource(st);
+     sp=ac.createScriptProcessor(2048,1,1);sp.onaudioprocess=onAudio;sn.connect(sp);sp.connect(ac.destination);
+     ws=new WebSocket(wsUrl());ws.onopen=function(){running=true;lastLoud=Date.now();state.className='idle';state.textContent='Listening...';meterLoop();};
      ws.onclose=function(){if(running){state.className='bad';state.textContent='Disconnected.';stopMic();}};
      $('go').textContent='Stop microphone';$('go').className='stop';
    }).catch(function(e){state.className='bad';state.textContent='Mic denied: '+e.message;});}
- function stopMic(){running=false;if(raf)cancelAnimationFrame(raf);if(stopTimer){clearTimeout(stopTimer);stopTimer=null;}setSpeaking(false);
+ function stopMic(){running=false;if(raf)cancelAnimationFrame(raf);setSpeaking(false);
+   if(sp){try{sp.disconnect();sp.onaudioprocess=null;}catch(e){}sp=null;}
    if(ws){try{ws.close();}catch(e){}ws=null;}if(stream){stream.getTracks().forEach(function(t){t.stop();});stream=null;}if(ac){try{ac.close();}catch(e){}ac=null;}
    meter.style.width='0%';$('go').textContent='Start microphone';$('go').className='';state.className='idle';state.textContent='Stopped';}
  $('go').onclick=function(){running?stopMic():startMic();};
