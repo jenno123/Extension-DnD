@@ -228,42 +228,63 @@ wss.on("connection", async (ws, req) => {
 setInterval(() => { for (const ws of wss.clients) if (ws.readyState === WebSocket.OPEN) ws.ping(); }, 30_000);
 server.listen(PORT, () => console.log(`Relay on :${PORT} (mode: ${supabaseOn ? "supabase" : "file"})`));
 
-// ---- Unified portal (join/create + roster + upload + mic) ------------------
+// ---- Unified portal (dark theme, join/create, roster, upload, mic, DM mode) -
 const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>D&D Voice Overlay</title>
 <style>
- :root{--gold:#e4c478;--ink:#1d1d1f}
- body{font-family:system-ui,Segoe UI,sans-serif;max-width:480px;margin:0 auto;padding:28px 18px 60px;color:var(--ink)}
- h1{font-size:22px;margin:0 0 4px}.sub{color:#888;font-size:13px;margin:0 0 18px}
- label{display:block;margin:14px 0 4px;font-size:13px;color:#444;font-weight:600}
- select,input[type=text],input[type=password],input[type=number],input[type=file]{width:100%;box-sizing:border-box;padding:10px;border:1px solid #ccc;border-radius:9px;font-size:14px}
- input[type=range]{width:100%}
- button{margin-top:14px;width:100%;padding:12px;border:0;border-radius:9px;background:#5865F2;color:#fff;font-weight:700;font-size:15px;cursor:pointer}
- button.stop{background:#c0392b}button.sec{background:#3a3a3a;margin-top:10px;padding:10px}button.ghost{background:#eee;color:#333}
- .hint{font-size:12px;color:#888;margin-top:4px;line-height:1.45}.bad{color:#c0392b}.ok{color:#1e8e3e}.live{color:#1e8e3e}.idle{color:#888}
- details{margin-top:12px;border:1px solid #eee;border-radius:10px;padding:10px 14px}summary{cursor:pointer;font-size:13px;font-weight:600;color:#444}
- #meterWrap{height:18px;background:#eee;border-radius:9px;overflow:hidden;margin-top:8px}#meter{height:100%;width:0%;background:#2ecc71;transition:width 60ms linear}
- #state{margin-top:14px;font-size:15px;font-weight:700;min-height:22px}
- img#prev{max-width:120px;border-radius:8px;margin-top:8px;display:none}
- .card{border:1px solid #e3dcc0;background:#fbf7e9;border-radius:12px;padding:14px;margin-top:14px}
- code{background:#efe9d6;padding:2px 7px;border-radius:6px;font-size:14px}
- .hdr{display:flex;justify-content:space-between;align-items:center;gap:10px}
- .pill{background:#1b1530;color:var(--gold);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:700}
- .switch{font-size:12px;color:#5865F2;cursor:pointer;text-decoration:underline;background:none;border:0;width:auto;margin:0;padding:0}
-</style></head><body>
+ :root{--gold:#e4c478;--bg1:#13111c;--bg2:#1b1530;--card:#241c3a;--ink:#f4ecd2;--mut:#a99fc4;--line:rgba(228,196,120,.22)}
+ *{box-sizing:border-box}
+ body{font-family:"Trebuchet MS",system-ui,Segoe UI,sans-serif;color:var(--ink);margin:0;min-height:100vh;
+   background:radial-gradient(1200px 600px at 50% -10%,#2a2147 0%,var(--bg2) 40%,var(--bg1) 100%)}
+ .wrap{max-width:520px;margin:0 auto;padding:30px 18px 70px}
+ h1{font-size:23px;margin:0 0 4px;letter-spacing:.3px}
+ .sub{color:var(--mut);font-size:13px;margin:0 0 20px}
+ label{display:block;margin:16px 0 5px;font-size:12px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+ input,select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;background:#150f24;color:var(--ink)}
+ input::placeholder{color:#6b6385}
+ input[type=range]{padding:0;border:0;background:none}
+ input[type=file]{padding:8px}
+ button{margin-top:14px;width:100%;padding:13px;border:0;border-radius:11px;font-weight:800;font-size:15px;cursor:pointer;
+   background:linear-gradient(180deg,#f0d291,#d8b15e);color:#231a06;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+ button:active{transform:translateY(1px)}
+ button.stop{background:linear-gradient(180deg,#e06b5f,#c0392b);color:#fff}
+ button.ghost{background:rgba(255,255,255,.07);color:var(--ink);box-shadow:none;border:1px solid var(--line);font-weight:700}
+ .hint{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.5}.bad{color:#ff9a8f}.ok{color:#8ee6a0}.live{color:#8ee6a0}.idle{color:var(--mut)}
+ details{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:rgba(255,255,255,.03)}
+ summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--ink)}
+ img#prev{max-width:120px;border-radius:10px;margin-top:10px;display:none}
+ #meterWrap{height:16px;background:#150f24;border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-top:8px}
+ #meter{height:100%;width:0%;background:linear-gradient(90deg,#7bd88f,#2ecc71)}
+ #state{margin-top:14px;font-size:15px;font-weight:800;min-height:22px}
+ .hdr{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:2px}
+ .pill{background:#0e0a1c;color:var(--gold);border:1px solid var(--line);border-radius:999px;padding:5px 14px;font-size:13px;font-weight:800;letter-spacing:1px}
+ .switch{font-size:12px;color:var(--gold);cursor:pointer;text-decoration:underline;background:none;border:0;width:auto;margin:0 0 8px;padding:0;box-shadow:none}
+ .seg{display:flex;gap:6px;background:#150f24;border:1px solid var(--line);border-radius:11px;padding:5px;margin-top:14px}
+ .seg button{margin:0;background:none;color:var(--mut);box-shadow:none;font-weight:800;padding:9px;border-radius:8px}
+ .seg button.on{background:linear-gradient(180deg,#f0d291,#d8b15e);color:#231a06}
+ .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+ .npc{position:relative;border-radius:12px;overflow:hidden;cursor:pointer;border:2px solid transparent;background:var(--card);aspect-ratio:3/4}
+ .npc img{width:100%;height:100%;object-fit:cover;display:block;opacity:.5;transition:opacity .15s,transform .15s}
+ .npc.active{border-color:var(--gold);box-shadow:0 0 0 2px rgba(228,196,120,.25),0 8px 22px rgba(0,0,0,.55)}
+ .npc.active img{opacity:1;transform:scale(1.03)}
+ .npc .nm{position:absolute;left:0;right:0;bottom:0;padding:8px 6px;background:linear-gradient(transparent,rgba(0,0,0,.85));font-size:12px;font-weight:800;text-align:center}
+ .npc .kbd{position:absolute;top:6px;left:6px;background:rgba(0,0,0,.65);color:var(--gold);border-radius:6px;padding:1px 8px;font-size:12px;font-weight:800}
+ .card{border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:12px;padding:14px;margin-top:14px;font-size:13px;color:var(--mut)}
+ code{background:#0e0a1c;color:var(--gold);padding:2px 8px;border-radius:6px;font-size:13px}
+</style></head><body><div class="wrap">
 
 <div id="joinView">
  <h1>🎭 D&D Voice Overlay</h1>
- <p class="sub">Your character lights up on Roll20 when you talk - using your own mic.</p>
+ <p class="sub">Your character lights up on Roll20 when you talk — your own mic, no Discord.</p>
  <label>Campaign code</label>
  <input id="code" type="text" placeholder="e.g. RAVEN7" style="text-transform:uppercase">
  <button id="joinBtn">Join campaign</button>
  <div id="joinMsg" class="hint"></div>
  <details>
-  <summary>I'm the Game Master - create a new campaign</summary>
+  <summary>I'm the Game Master — create a new campaign</summary>
   <label>Campaign name</label><input id="cName" type="text" placeholder="e.g. Curse of Strahd">
   <label>Admin password</label><input id="cPw" type="password" placeholder="your ADMIN_PASSWORD">
-  <button id="createBtn" class="sec">Create campaign</button>
+  <button id="createBtn" class="ghost">Create campaign</button>
   <div id="createMsg" class="hint"></div>
  </details>
 </div>
@@ -272,77 +293,112 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  <div class="hdr"><h1 style="font-size:20px;margin:0">🎭 Voice Overlay</h1><span class="pill" id="pill"></span></div>
  <button class="switch" id="switchBtn">switch campaign</button>
 
- <details id="hostBox" style="display:none">
-  <summary>Share with players / host info</summary>
-  <div class="hint" id="shareInfo"></div>
- </details>
+ <details id="hostBox" style="display:none"><summary>Share with players / host info</summary><div class="hint" id="shareInfo"></div></details>
 
- <label>I'm playing</label>
- <select id="char"><option value="">Loading...</option></select>
+ <div class="seg"><button id="mPlayer" class="on">🎙️ Player</button><button id="mDm">👑 DM</button></div>
 
- <details><summary>+ Add or update my character</summary>
+ <div id="playerPane">
+  <label>I'm playing</label>
+  <select id="char"><option value="">Loading...</option></select>
+ </div>
+
+ <div id="dmPane" style="display:none">
+  <label>Tap a character (or press 1-9) to make them the active speaker</label>
+  <div class="grid" id="board"></div>
+ </div>
+
+ <details><summary>+ Add or update a character</summary>
   <label>Character name</label><input id="newName" type="text" placeholder="e.g. Medvind">
   <label>Portrait image (transparent PNG looks best)</label><input id="newFile" type="file" accept="image/*">
-  <img id="prev"><button id="add" class="sec">Save my portrait</button><div id="addMsg" class="hint"></div>
+  <img id="prev"><button id="add" class="ghost">Save portrait</button><div id="addMsg" class="hint"></div>
  </details>
 
  <label>Sensitivity (fill the bar only when you talk)</label>
  <input id="sens" type="range" min="1" max="40" value="6"><div id="meterWrap"><div id="meter"></div></div>
- <label>Hold (ms) - stays lit through short pauses</label><input id="holdNum" type="number" value="1200" min="200" max="4000" step="100">
+ <label>Hold (ms) — stays lit through short pauses</label><input id="holdNum" type="number" value="1200" min="200" max="4000" step="100">
  <button id="go">Start microphone</button>
  <div id="state" class="idle">Stopped</div>
 
  <p class="hint" style="margin-top:18px">To see the portraits, install the Roll20 overlay extension and enter this campaign code in its popup. Keep this tab open while you play.</p>
 </div>
 
-<script>
+</div><script>
 (function(){
  var $=function(i){return document.getElementById(i);};
- var room='', ws=null,ac=null,an=null,stream=null,raf=null,running=false,speaking=false,stopTimer=null;
+ var room='', mode='player', dmActive='', boardIds=[], chars={};
+ var ws=null,ac=null,an=null,stream=null,raf=null,running=false,speaking=false,stopTimer=null;
  var state=$('state'),meter=$('meter');
  function api(p){return p+(p.indexOf('?')<0?'?':'&')+'room='+encodeURIComponent(room);}
 
- // ---- join / create ----
- function showJoin(){ $('joinView').style.display='block'; $('playView').style.display='none'; }
+ function showJoin(){$('joinView').style.display='block';$('playView').style.display='none';}
  function enter(code,name,isHost){
-   room=code.toUpperCase();
-   try{localStorage.setItem('dndRoom',room);}catch(e){}
-   $('pill').textContent=room;
-   $('hostBox').style.display = isHost ? 'block' : 'none';
-   if(isHost){
-     $('hostBox').open=true;
-     $('shareInfo').innerHTML='Player link: <code>'+location.origin+'/?room='+room+'</code><br>'+
-       'Extension campaign code: <code>'+room+'</code>'+(name?('<br>Campaign: '+name):'');
-   }
-   $('joinView').style.display='none'; $('playView').style.display='block';
-   loadChars();
+   room=code.toUpperCase(); try{localStorage.setItem('dndRoom',room);}catch(e){}
+   $('pill').textContent=room; $('hostBox').style.display=isHost?'block':'none';
+   if(isHost){$('hostBox').open=true;$('shareInfo').innerHTML='Player link: <code>'+location.origin+'/?room='+room+'</code><br>Extension campaign code: <code>'+room+'</code>'+(name?('<br>Campaign: '+name):'');}
+   $('joinView').style.display='none'; $('playView').style.display='block'; loadChars();
  }
  $('joinBtn').onclick=function(){
-   var code=($('code').value||'').trim().toUpperCase(), m=$('joinMsg'); m.className='hint';
+   var code=($('code').value||'').trim().toUpperCase(),m=$('joinMsg');m.className='hint';
    if(!code){m.className='bad';m.textContent='Enter a campaign code.';return;}
    m.textContent='Checking...';
    fetch('/room?room='+encodeURIComponent(code)).then(function(r){return r.json();}).then(function(j){
-     if(j.exists){ m.textContent=''; enter(code,j.name,false); }
-     else { m.className='bad'; m.textContent='No campaign with that code.'; }
+     if(j.exists){m.textContent='';enter(code,j.name,false);}else{m.className='bad';m.textContent='No campaign with that code.';}
    }).catch(function(){m.className='bad';m.textContent='Could not reach server.';});
  };
  $('createBtn').onclick=function(){
-   var name=($('cName').value||'').trim(), pw=$('cPw').value, m=$('createMsg'); m.className='hint';
+   var name=($('cName').value||'').trim(),pw=$('cPw').value,m=$('createMsg');m.className='hint';
    if(!name||!pw){m.className='bad';m.textContent='Enter a name and admin password.';return;}
    m.textContent='Creating...';
    fetch('/create?'+new URLSearchParams({name:name,password:pw}),{method:'POST'})
    .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();})
-   .then(function(j){ m.className='ok'; m.textContent='Created code '+j.room; enter(j.room,name,true); })
+   .then(function(j){m.className='ok';m.textContent='Created code '+j.room;enter(j.room,name,true);})
    .catch(function(e){m.className='bad';m.textContent='Failed: '+e.message;});
  };
- $('switchBtn').onclick=function(){ if(running)stopMic(); try{localStorage.removeItem('dndRoom');}catch(e){} room=''; showJoin(); };
+ $('switchBtn').onclick=function(){if(running)stopMic();try{localStorage.removeItem('dndRoom');}catch(e){}room='';showJoin();};
 
- // ---- roster + upload ----
+ // mode toggle
+ function setMode(m){
+   if(speaking)setSpeaking(false);
+   mode=m;
+   $('mPlayer').className=m==='player'?'on':''; $('mDm').className=m==='dm'?'on':'';
+   $('playerPane').style.display=m==='player'?'block':'none';
+   $('dmPane').style.display=m==='dm'?'block':'none';
+   if(m==='dm'&&!dmActive&&boardIds.length){setDmActive(boardIds[0]);}
+ }
+ $('mPlayer').onclick=function(){setMode('player');};
+ $('mDm').onclick=function(){setMode('dm');};
+
  function loadChars(sel){return fetch(api('/campaign.json'),{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
-   var s=$('char'),chars=(c&&c.characters)||{},ids=Object.keys(chars);
-   s.innerHTML=ids.length?'<option value="">- choose your character -</option>':'<option value="">(none yet - add yourself below)</option>';
-   ids.forEach(function(id){var o=document.createElement('option');o.value=id;o.textContent=chars[id].name||id;if(id===sel)o.selected=true;s.appendChild(o);});
+   chars=(c&&c.characters)||{}; boardIds=Object.keys(chars);
+   // player dropdown
+   var s=$('char');
+   s.innerHTML=boardIds.length?'<option value="">- choose your character -</option>':'<option value="">(none yet - add below)</option>';
+   boardIds.forEach(function(id){var o=document.createElement('option');o.value=id;o.textContent=chars[id].name||id;if(id===sel)o.selected=true;s.appendChild(o);});
+   // DM board
+   var b=$('board'); b.innerHTML='';
+   boardIds.forEach(function(id,i){
+     var d=document.createElement('div'); d.className='npc'; d.dataset.id=id;
+     var img=document.createElement('img'); img.src=chars[id].portrait||''; img.alt=chars[id].name||'';
+     var nm=document.createElement('div'); nm.className='nm'; nm.textContent=chars[id].name||id;
+     d.appendChild(img); d.appendChild(nm);
+     if(i<9){var k=document.createElement('div');k.className='kbd';k.textContent=(i+1);d.appendChild(k);}
+     d.onclick=function(){setDmActive(id);};
+     b.appendChild(d);
+   });
+   if(mode==='dm'){ if(boardIds.indexOf(dmActive)<0) dmActive=''; if(!dmActive&&boardIds.length)setDmActive(boardIds[0]); else highlightBoard(); }
  }).catch(function(){$('char').innerHTML='<option value="">(could not load)</option>';});}
+
+ function highlightBoard(){var cards=$('board').children;for(var i=0;i<cards.length;i++){cards[i].className='npc'+(cards[i].dataset.id===dmActive?' active':'');}}
+ function setDmActive(id){
+   if(mode==='dm'&&speaking&&dmActive!==id){ rawSend(dmActive,false); rawSend(id,true); }
+   dmActive=id; highlightBoard();
+ }
+ document.addEventListener('keydown',function(e){
+   if(mode!=='dm'||$('playView').style.display==='none')return;
+   if(e.target&&/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName))return;
+   var n=parseInt(e.key,10); if(n>=1&&n<=9&&boardIds[n-1])setDmActive(boardIds[n-1]);
+ });
+
  $('newFile').onchange=function(e){var f=e.target.files[0];if(f){$('prev').src=URL.createObjectURL(f);$('prev').style.display='block';}};
  $('add').onclick=function(){
    var name=$('newName').value.trim(),f=$('newFile').files[0],m=$('addMsg');m.className='hint';
@@ -355,17 +411,19 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
    .catch(function(e){m.className='bad';m.textContent='Failed: '+e.message;});
  };
 
- // ---- mic VAD ----
+ function curId(){return mode==='dm'?dmActive:$('char').value;}
  function wsUrl(){var p=location.protocol==='https:'?'wss://':'ws://';return p+location.host+'/?role=reporter&room='+encodeURIComponent(room);}
- function send(on){var id=$('char').value;if(ws&&ws.readyState===1&&id)ws.send(JSON.stringify({type:'speaking',userId:id,speaking:on}));}
- function setSpeaking(on){if(on===speaking)return;speaking=on;send(on);state.className=on?'live':'idle';state.textContent=on?'🔊 Speaking - portrait is lit':'Listening...';}
+ function rawSend(id,on){if(ws&&ws.readyState===1&&id)ws.send(JSON.stringify({type:'speaking',userId:id,speaking:on}));}
+ function setSpeaking(on){if(on===speaking)return;speaking=on;rawSend(curId(),on);state.className=on?'live':'idle';state.textContent=on?'🔊 Speaking - portrait is lit':'Listening...';}
  function loop(){if(!running)return;var b=new Uint8Array(an.fftSize);an.getByteTimeDomainData(b);var s=0;for(var i=0;i<b.length;i++){var x=(b[i]-128)/128;s+=x*x;}
    var level=Math.min(1,Math.sqrt(s/b.length)*4);meter.style.width=(level*100).toFixed(0)+'%';
    var thr=parseInt($('sens').value,10)/100,hold=Math.max(200,parseInt($('holdNum').value,10)||1200);
    if(level>thr){if(stopTimer){clearTimeout(stopTimer);stopTimer=null;}setSpeaking(true);}
    else if(speaking&&!stopTimer){stopTimer=setTimeout(function(){stopTimer=null;setSpeaking(false);},hold);}
    raf=requestAnimationFrame(loop);}
- function startMic(){var id=$('char').value;if(!id){state.className='bad';state.textContent='Pick your character first.';return;}
+ function startMic(){
+   if(mode==='player'&&!$('char').value){state.className='bad';state.textContent='Pick your character first.';return;}
+   if(mode==='dm'&&!dmActive){state.className='bad';state.textContent='Tap a character first.';return;}
    navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false}).then(function(st){
      stream=st;ac=new (window.AudioContext||window.webkitAudioContext)();var sn=ac.createMediaStreamSource(st);an=ac.createAnalyser();an.fftSize=512;sn.connect(an);
      ws=new WebSocket(wsUrl());ws.onopen=function(){running=true;state.className='idle';state.textContent='Listening...';loop();};
@@ -377,14 +435,10 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
    meter.style.width='0%';$('go').textContent='Start microphone';$('go').className='';state.className='idle';state.textContent='Stopped';}
  $('go').onclick=function(){running?stopMic():startMic();};
 
- // ---- boot: ?room= in URL, else last used ----
- var urlRoom=(new URLSearchParams(location.search).get('room')||'').toUpperCase();
- var saved=''; try{saved=(localStorage.getItem('dndRoom')||'').toUpperCase();}catch(e){}
+ var urlRoom=(new URLSearchParams(location.search).get('room')||'').toUpperCase(),saved='';
+ try{saved=(localStorage.getItem('dndRoom')||'').toUpperCase();}catch(e){}
  var initial=urlRoom||saved;
- if(initial){
-   fetch('/room?room='+encodeURIComponent(initial)).then(function(r){return r.json();}).then(function(j){
-     if(j.exists) enter(initial,j.name,false); else showJoin();
-   }).catch(showJoin);
- } else showJoin();
+ if(initial){fetch('/room?room='+encodeURIComponent(initial)).then(function(r){return r.json();}).then(function(j){if(j.exists)enter(initial,j.name,false);else showJoin();}).catch(showJoin);}
+ else showJoin();
 })();
 </script></body></html>`;
