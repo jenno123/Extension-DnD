@@ -146,8 +146,8 @@ const server = http.createServer(async (req, res) => {
       if (!supabaseOn) { res.writeHead(503, CORS); return res.end("not configured"); }
       const pass = url.searchParams.get("password") ?? "";
       const name = (url.searchParams.get("name") ?? "").trim();
-      if (!ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("ADMIN_PASSWORD is not set on the server (add it on Render and redeploy)"); }
-      if (pass !== ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("wrong admin password"); }
+      // Creation is OPEN unless an operator lock (ADMIN_PASSWORD) is configured.
+      if (ADMIN_PASSWORD && pass !== ADMIN_PASSWORD) { res.writeHead(401, CORS); return res.end("wrong admin password"); }
       if (!name) { res.writeHead(400, CORS); return res.end("name required"); }
       const room = await sbCreateRoom(name);
       res.writeHead(200, { "Content-Type": "application/json", ...CORS });
@@ -284,7 +284,7 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  <details>
   <summary>I'm the Game Master — create a new campaign</summary>
   <label>Campaign name</label><input id="cName" type="text" placeholder="e.g. Curse of Strahd">
-  <label>Admin password</label><input id="cPw" type="password" placeholder="your ADMIN_PASSWORD">
+  <label id="cPwLabel" style="display:none">Admin password</label><input id="cPw" type="password" placeholder="admin password (only if your server requires it)" style="display:none">
   <button id="createBtn" class="ghost">Create campaign</button>
   <div id="createMsg" class="hint"></div>
  </details>
@@ -326,7 +326,11 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 </div><script>
 (function(){
  var $=function(i){return document.getElementById(i);};
- var room='', mode='player', dmActive='', boardIds=[], chars={};
+ var room='', mode='player', dmActive='', boardIds=[], chars={}, adminRequired=false;
+ fetch('/health').then(function(r){return r.json();}).then(function(j){
+   adminRequired=!!j.admin;
+   if(adminRequired){$('cPwLabel').style.display='block';$('cPw').style.display='block';}
+ }).catch(function(){});
  var ws=null,ac=null,an=null,stream=null,raf=null,running=false,speaking=false,stopTimer=null;
  var state=$('state'),meter=$('meter');
  function api(p){return p+(p.indexOf('?')<0?'?':'&')+'room='+encodeURIComponent(room);}
@@ -348,9 +352,11 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  };
  $('createBtn').onclick=function(){
    var name=($('cName').value||'').trim(),pw=$('cPw').value,m=$('createMsg');m.className='hint';
-   if(!name||!pw){m.className='bad';m.textContent='Enter a name and admin password.';return;}
+   if(!name){m.className='bad';m.textContent='Enter a campaign name.';return;}
+   if(adminRequired&&!pw){m.className='bad';m.textContent='This server requires an admin password.';return;}
    m.textContent='Creating...';
-   fetch('/create?'+new URLSearchParams({name:name,password:pw}),{method:'POST'})
+   var prm={name:name}; if(adminRequired)prm.password=pw;
+   fetch('/create?'+new URLSearchParams(prm),{method:'POST'})
    .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return r.json();})
    .then(function(j){m.className='ok';m.textContent='Created code '+j.room;enter(j.room,name,true);})
    .catch(function(e){m.className='bad';m.textContent='Failed: '+e.message;});
