@@ -17,7 +17,7 @@ import http from "http";
 import { readFile } from "fs/promises";
 import { createReadStream } from "fs";
 import path from "path";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer, WebSocket, RawData } from "ws";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const CONFIG_DIR = path.resolve(process.cwd(), process.env.CONFIG_DIR ?? "../../config");
@@ -144,6 +144,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CORS });
       return res.end(ADMIN_HTML);
     }
+    if (url.pathname === "/mic" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...CORS });
+      return res.end(MIC_HTML);
+    }
     if (url.pathname === "/admin/upload" && req.method === "POST") {
       if (!supabaseOn) { res.writeHead(503, CORS); return res.end("uploads not configured"); }
       const id = (url.searchParams.get("id") ?? "").trim();
@@ -175,6 +179,18 @@ function broadcastToDisplays(msg: SpeakingMessage) {
   for (const ws of displays) if (ws.readyState === WebSocket.OPEN) ws.send(data);
 }
 
+function applySpeaking(userId: string, isSpeaking: boolean): void {
+  if (isSpeaking) speaking.add(userId); else speaking.delete(userId);
+  broadcastToDisplays({ type: "speaking", userId, speaking: isSpeaking, ts: Date.now() });
+}
+
+function onSpeakingMessage(buf: RawData): void {
+  let msg: SpeakingMessage;
+  try { msg = JSON.parse(buf.toString()); } catch { return; }
+  if (msg.type !== "speaking" || typeof msg.userId !== "string") return;
+  applySpeaking(msg.userId, !!msg.speaking);
+}
+
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const role = url.searchParams.get("role") ?? "display";
@@ -185,14 +201,20 @@ wss.on("connection", (ws, req) => {
       return ws.close(1008, "bad token");
     }
     console.log("[ws] source (discord-listener) connected");
-    ws.on("message", (buf) => {
-      let msg: SpeakingMessage;
-      try { msg = JSON.parse(buf.toString()); } catch { return; }
-      if (msg.type !== "speaking" || typeof msg.userId !== "string") return;
-      if (msg.speaking) speaking.add(msg.userId); else speaking.delete(msg.userId);
-      broadcastToDisplays({ type: "speaking", userId: msg.userId, speaking: !!msg.speaking, ts: Date.now() });
-    });
+    ws.on("message", onSpeakingMessage);
     ws.on("close", () => console.log("[ws] source disconnected"));
+    return;
+  }
+
+  if (role === "reporter") {
+    // A player's own browser (the /mic page) reporting their mic activity.
+    // Gated by the group password so only your players can report.
+    if (!ADMIN_PASSWORD || url.searchParams.get("password") !== ADMIN_PASSWORD) {
+      return ws.close(1008, "bad password");
+    }
+    console.log("[ws] reporter (mic) connected");
+    ws.on("message", onSpeakingMessage);
+    ws.on("close", () => console.log("[ws] reporter disconnected"));
     return;
   }
 
@@ -255,4 +277,124 @@ const ADMIN_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
      else{m.className='bad';m.textContent='Failed: '+(await r.text());}
    }catch(err){m.className='bad';m.textContent='Error: '+err.message;}
  };
+</script></body></html>`;
+
+// ---- Mic reporter page (Option B: client-side voice-activity detection) ----
+const MIC_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D&D Voice Overlay - Microphone</title>
+<style>
+ body{font-family:system-ui,Segoe UI,sans-serif;max-width:460px;margin:36px auto;padding:0 18px;color:#1d1d1f}
+ h1{font-size:20px} label{display:block;margin:14px 0 4px;font-size:13px;color:#444;font-weight:600}
+ select,input[type=password]{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px}
+ input[type=range]{width:100%}
+ button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:8px;background:#5865F2;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+ button.stop{background:#c0392b}
+ .hint{font-size:12px;color:#888;margin-top:4px;line-height:1.4}
+ #meterWrap{height:18px;background:#eee;border-radius:9px;overflow:hidden;margin-top:8px}
+ #meter{height:100%;width:0%;background:#2ecc71;transition:width 60ms linear}
+ #thr{height:100%;}
+ #state{margin-top:14px;font-size:15px;font-weight:700;min-height:22px}
+ .live{color:#1e8e3e}.idle{color:#888}.bad{color:#c0392b}
+ .row{display:flex;gap:6px;align-items:center}
+</style></head><body>
+<h1>🎙️ D&D Voice Overlay - your microphone</h1>
+<p class="hint">This lights up your character on everyone's Roll20 when you talk - using your own mic, no Discord needed. Audio never leaves your device; only an on/off signal is sent. Keep this tab open while you play.</p>
+
+<label>I'm playing</label>
+<select id="char"><option value="">Loading characters...</option></select>
+
+<label>Group password</label>
+<input id="pw" type="password" placeholder="ask your host">
+
+<label>Sensitivity (move the slider so the bar fills only when you talk)</label>
+<input id="sens" type="range" min="1" max="40" value="6">
+<div id="meterWrap"><div id="meter"></div></div>
+<p class="hint">The green bar is your live mic level. The portrait triggers when it passes your sensitivity threshold.</p>
+
+<label>Hold (ms) - keeps you "speaking" through short pauses</label>
+<input id="hold" type="password" style="display:none">
+<input id="holdNum" type="number" value="1200" min="200" max="4000" step="100" style="width:120px;padding:8px;border:1px solid #ccc;border-radius:8px">
+
+<button id="go">Start microphone</button>
+<div id="state" class="idle">Stopped</div>
+
+<script>
+(function(){
+ var $=function(id){return document.getElementById(id);};
+ var ws=null, ac=null, an=null, stream=null, raf=null, running=false;
+ var speaking=false, stopTimer=null;
+ var state=$('state'), meter=$('meter');
+
+ // load characters
+ fetch('/campaign.json',{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
+   var sel=$('char'); sel.innerHTML='';
+   var chars=(c&&c.characters)||{};
+   var ids=Object.keys(chars);
+   if(!ids.length){ sel.innerHTML='<option value="">(no characters yet - upload at /admin)</option>'; return; }
+   sel.innerHTML='<option value="">- choose your character -</option>';
+   ids.forEach(function(id){
+     var o=document.createElement('option'); o.value=id; o.textContent=chars[id].name||id; sel.appendChild(o);
+   });
+ }).catch(function(){ $('char').innerHTML='<option value="">(could not load characters)</option>'; });
+
+ function wsUrl(pw){
+   var proto = location.protocol==='https:' ? 'wss://' : 'ws://';
+   return proto+location.host+'/?role=reporter&password='+encodeURIComponent(pw);
+ }
+ function send(isSpeaking){
+   var id=$('char').value;
+   if(ws && ws.readyState===1 && id){ ws.send(JSON.stringify({type:'speaking',userId:id,speaking:isSpeaking})); }
+ }
+ function setSpeaking(on){
+   if(on===speaking) return;
+   speaking=on; send(on);
+   state.className = on ? 'live' : 'idle';
+   state.textContent = on ? '🔊 Speaking - portrait is lit' : 'Listening...';
+ }
+ function loop(){
+   if(!running) return;
+   var buf=new Uint8Array(an.fftSize); an.getByteTimeDomainData(buf);
+   var sum=0; for(var i=0;i<buf.length;i++){ var x=(buf[i]-128)/128; sum+=x*x; }
+   var rms=Math.sqrt(sum/buf.length);
+   var level=Math.min(1, rms*4);
+   meter.style.width=(level*100).toFixed(0)+'%';
+   var threshold=parseInt($('sens').value,10)/100; // 0.01 .. 0.40
+   var hold=Math.max(200, parseInt($('holdNum').value,10)||1200);
+   if(level>threshold){
+     if(stopTimer){ clearTimeout(stopTimer); stopTimer=null; }
+     setSpeaking(true);
+   } else if(speaking && !stopTimer){
+     stopTimer=setTimeout(function(){ stopTimer=null; setSpeaking(false); }, hold);
+   }
+   raf=requestAnimationFrame(loop);
+ }
+ function start(){
+   var pw=$('pw').value, id=$('char').value;
+   if(!id){ state.className='bad'; state.textContent='Pick your character first.'; return; }
+   if(!pw){ state.className='bad'; state.textContent='Enter the group password.'; return; }
+   navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false})
+   .then(function(s){
+     stream=s; ac=new (window.AudioContext||window.webkitAudioContext)();
+     var srcNode=ac.createMediaStreamSource(s); an=ac.createAnalyser(); an.fftSize=512; srcNode.connect(an);
+     ws=new WebSocket(wsUrl(pw));
+     ws.onopen=function(){ running=true; state.className='idle'; state.textContent='Listening...'; loop(); };
+     ws.onclose=function(){ if(running){ state.className='bad'; state.textContent='Disconnected (wrong password?).'; stop(); } };
+     ws.onerror=function(){};
+     $('go').textContent='Stop microphone'; $('go').className='stop';
+   }).catch(function(e){ state.className='bad'; state.textContent='Mic access denied: '+e.message; });
+ }
+ function stop(){
+   running=false; if(raf)cancelAnimationFrame(raf);
+   if(stopTimer){clearTimeout(stopTimer);stopTimer=null;}
+   setSpeaking(false);
+   if(ws){try{ws.close();}catch(e){} ws=null;}
+   if(stream){stream.getTracks().forEach(function(t){t.stop();});stream=null;}
+   if(ac){try{ac.close();}catch(e){} ac=null;}
+   meter.style.width='0%';
+   $('go').textContent='Start microphone'; $('go').className='';
+   state.className='idle'; state.textContent='Stopped';
+ }
+ $('go').onclick=function(){ running?stop():start(); };
+})();
 </script></body></html>`;

@@ -21,9 +21,10 @@
   pointer-events: none;
   opacity: 0;
   transform: translateY(60px) scale(0.97);
+  /* This (base/inactive) transition governs the SLOW fade-OUT. */
   transition:
-    opacity 220ms ease,
-    transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 800ms ease,
+    transform 650ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .dnd-portrait img {
@@ -61,6 +62,10 @@
 .dnd-portrait.active {
   opacity: 1;
   transform: translateY(0) scale(1);
+  /* Fast, snappy pop-IN (overrides the slow fade-out timing). */
+  transition:
+    opacity 200ms ease,
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .dnd-portrait.active img {
   filter:

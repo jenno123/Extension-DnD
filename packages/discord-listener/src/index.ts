@@ -23,6 +23,33 @@ const RELAY_TOKEN = process.env.RELAY_TOKEN ?? "";
 // Discord, but the host IS the app owner, so authorization just works.
 const SCOPES = ["rpc", "rpc.voice.read"];
 
+// How long (ms) to keep a speaker "active" after Discord reports they stopped.
+// Discord fires STOP on every tiny gap between words, so we hold briefly and
+// cancel the hide if they start talking again. Higher = steadier, less poppy.
+const SPEAK_HOLD_MS = Number(process.env.SPEAK_HOLD_MS ?? 1200);
+
+// Debounce manager: smooths the rapid SPEAKING_START/STOP into clean events.
+const speakingNow = new Set<string>();
+const stopTimers = new Map<string, NodeJS.Timeout>();
+
+function handleStart(userId: string): void {
+  const t = stopTimers.get(userId);
+  if (t) { clearTimeout(t); stopTimers.delete(userId); }
+  if (!speakingNow.has(userId)) {
+    speakingNow.add(userId);
+    relay.publishSpeaking(userId, true);
+  }
+}
+function handleStop(userId: string): void {
+  if (stopTimers.has(userId)) return; // already scheduled to hide
+  const t = setTimeout(() => {
+    stopTimers.delete(userId);
+    speakingNow.delete(userId);
+    relay.publishSpeaking(userId, false);
+  }, SPEAK_HOLD_MS);
+  stopTimers.set(userId, t);
+}
+
 function requireEnv(key: string): string {
   const v = process.env[key];
   if (!v) {
@@ -51,12 +78,8 @@ async function main(): Promise<void> {
     });
   });
 
-  client.on("SPEAKING_START", (data) => {
-    relay.publishSpeaking(data.user_id, true);
-  });
-  client.on("SPEAKING_STOP", (data) => {
-    relay.publishSpeaking(data.user_id, false);
-  });
+  client.on("SPEAKING_START", (data) => handleStart(data.user_id));
+  client.on("SPEAKING_STOP", (data) => handleStop(data.user_id));
 
   client.on("disconnected", () => {
     console.warn("[discord] disconnected from client, retrying login in 3s");

@@ -13,7 +13,7 @@
   const DEFAULT_RELAY_URL = "https://extension-dnd.onrender.com";
   const SLOTS = ["slot-left", "slot-right", "slot-left-2", "slot-right-2"];
   const slotOccupant = new Array(SLOTS.length).fill(null);
-  const HIDE_DELAY_MS = 340;
+  const HIDE_DELAY_MS = 850;  // > fade-out duration so the slot frees after the fade
 
   let socket = null;
   let reconnectMs = 1000;
