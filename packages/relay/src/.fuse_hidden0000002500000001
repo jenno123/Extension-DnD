@@ -302,7 +302,7 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  <div class="hdr"><h1 style="font-size:20px;margin:0">🎭 Voice Overlay</h1><span class="pill" id="pill"></span></div>
  <button class="switch" id="switchBtn">switch campaign</button>
 
- <details id="hostBox" style="display:none"><summary>👑 Invite players</summary><div class="hint" id="shareInfo"></div></details>
+ <details id="hostBox" style="display:none"><summary>Share with players / host info</summary><div class="hint" id="shareInfo"></div></details>
 
  <div class="seg" id="dmSeg" style="display:none"><button id="mPlayer" class="on">🎙️ Player</button><button id="mDm">👑 DM</button></div>
 
@@ -344,20 +344,17 @@ const PORTAL_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
  function api(p){return p+(p.indexOf('?')<0?'?':'&')+'room='+encodeURIComponent(room);}
 
  function showJoin(){$('joinView').style.display='block';$('playView').style.display='none';}
-function enter(code,name,isDm){
+" function enter_PLACEHOLDER(){}";
+ function enter(code,name,isDm){
    room=code.toUpperCase(); try{localStorage.setItem('dndRoom',room);}catch(e){}
    $('pill').textContent=room;
    $('dmSeg').style.display = isDm ? 'flex' : 'none';
-   setMode(isDm ? 'dm' : 'player');
+   if(!isDm) setMode('player');
    $('hostBox').style.display = isDm ? 'block' : 'none';
    if(isDm){
-     var plink=location.origin+'/?room='+room;
+     $('hostBox').open=true;
      var dmLink=location.origin+'/?room='+room+(dmKeyVal?('&dm='+dmKeyVal):'');
-     $('shareInfo').innerHTML='<b>You are the DM 👑</b> &mdash; players you invite can only control their own character.<br><br>'+
-       '<b>Send your players this one link:</b><br><code id="plink">'+plink+'</code> <button id="copyP" class="ghost" style="width:auto;margin-top:8px;padding:6px 14px">Copy link</button><br>'+
-       '<span style="color:#8a82a6">(or they enter code <b>'+room+'</b> in the overlay extension)</span>'+
-       '<details style="margin-top:10px"><summary>Use DM on another device?</summary>Open this private link there, and keep it secret:<br><code>'+dmLink+'</code></details>';
-     var cp=$('copyP'); if(cp)cp.onclick=function(){try{navigator.clipboard.writeText(plink);}catch(e){} cp.textContent='Copied!'; setTimeout(function(){cp.textContent='Copy link';},1500);};
+     $('shareInfo').innerHTML='<b>Share with players</b> (player link - no DM access):<br><code>'+location.origin+'/?room='+room+'</code><br>Extension campaign code: <code>'+room+'</code><br><br><b>Your private DM link</b> (bookmark, keep secret):<br><code>'+dmLink+'</code>'+(name?('<br><br>Campaign: '+name):'');
    }
    $('joinView').style.display='none'; $('playView').style.display='block'; loadChars();
  }
