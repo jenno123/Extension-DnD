@@ -172,3 +172,25 @@
 #dnd-dm-strip .dnd-strip-meter { width:56px; height:8px; background:#150f24; border:1px solid var(--line,rgba(228,196,120,.22)); border-radius:5px; overflow:hidden; flex:0 0 auto; }
 #dnd-dm-strip .dnd-strip-meter-fill { height:100%; width:0%; background:linear-gradient(90deg,#7bd88f,#2ecc71); }
 #dnd-dm-strip .dnd-strip-test { width:auto; padding:7px 12px; border-radius:10px; border:1px solid rgba(228,196,120,.4); background:#251c3c; color:#f4ecd2; font-size:12px; font-weight:700; flex:0 0 auto; cursor:pointer; }
+
+/* + add tile */
+#dnd-dm-strip .dnd-add-tile { display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:700; color:#e4c478; background:#1d1733; border:2px dashed rgba(228,196,120,.5); }
+#dnd-dm-strip .dnd-add-tile:hover { background:#241c3a; }
+/* per-character delete */
+.dnd-dm-thumb .dnd-dm-del { position:absolute; top:1px; right:1px; width:18px; height:18px; line-height:16px; text-align:center; font-size:14px; font-weight:800; color:#fff; background:rgba(192,57,43,.9); border-radius:50%; opacity:0; transition:opacity .12s; cursor:pointer; }
+.dnd-dm-thumb:hover .dnd-dm-del { opacity:1; }
+/* collapse */
+#dnd-dm-strip .dnd-dm-collapse { width:26px; height:40px; border-radius:9px; cursor:pointer; border:1px solid rgba(228,196,120,.4); background:#251c3c; color:#e4c478; font-size:14px; font-weight:800; flex:0 0 auto; }
+#dnd-dm-strip.collapsed { gap:0; padding:6px 8px; }
+#dnd-dm-strip.collapsed > *:not(.dnd-dm-collapse) { display:none; }
+/* add panel (floats above the strip) */
+#dnd-add-panel { position:fixed; left:50%; bottom:72px; transform:translateX(-50%); z-index:2147483647; pointer-events:auto;
+  width:280px; background:rgba(20,15,36,.97); border:1px solid rgba(228,196,120,.5); border-radius:12px; padding:14px;
+  box-shadow:0 10px 30px rgba(0,0,0,.6); font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif; color:#f4ecd2; }
+#dnd-add-panel .dnd-add-title { font-weight:800; font-size:14px; margin-bottom:10px; }
+#dnd-add-panel input { width:100%; box-sizing:border-box; margin-bottom:9px; padding:9px 10px; border:1px solid rgba(228,196,120,.3); border-radius:8px; background:#150f24; color:#f4ecd2; font-size:13px; }
+#dnd-add-panel input[type=file] { padding:7px; }
+#dnd-add-panel .dnd-add-btns { display:flex; gap:8px; }
+#dnd-add-panel .dnd-add-save { flex:1; padding:9px; border:0; border-radius:8px; font-weight:800; font-size:13px; cursor:pointer; background:linear-gradient(180deg,#f0d291,#d8b15e); color:#231a06; }
+#dnd-add-panel .dnd-add-cancel { padding:9px 14px; border:1px solid rgba(228,196,120,.3); border-radius:8px; font-weight:700; font-size:13px; cursor:pointer; background:rgba(255,255,255,.07); color:#f4ecd2; }
+#dnd-add-panel .dnd-add-msg { font-size:12px; color:#a99fc4; margin-top:8px; min-height:14px; }

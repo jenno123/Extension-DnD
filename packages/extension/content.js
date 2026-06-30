@@ -19,17 +19,20 @@
   let socket = null;
   let reconnectMs = 1000;
   let portraitEls = new Map();
+  let livingRaf = null;
+  const levelTarget = {}, levelCur = {}, levelTime = {};
   let rootEl = null, statusEl = null, pausedBanner = null;
   let teardown = false;
   let paused = false;
   let room = "DEFAULT";
   // ---- DM mode state ----
-  const DM_KEY = "dmMode", JOIN_KEY = "joinPw", SENS_KEY = "dmSens", HOLD_KEY = "dmHold", MYCHAR_KEY = "myCharacterId";
-  let dmMode = false, joinPw = "", dmSens = 6, dmHold = 1200, myChar = "";
+  const DM_KEY = "dmMode", JOIN_KEY = "joinPw", SENS_KEY = "dmSens", HOLD_KEY = "dmHold", MYCHAR_KEY = "myCharacterId", MYCHARS_KEY = "myCharacterIds", COLLAPSE_KEY = "stripCollapsed";
+  const PLAYER_MAX = 3, DM_MAX = 10;
+  let dmMode = false, joinPw = "", dmSens = 6, dmHold = 1200, myCharacterIds = [], collapsed = false, addPanel = null;
   let campaignChars = {}, relayBase = "";
   let strip = null, repWs = null, repAc = null, repSp = null, repStream = null;
   let repRunning = false, repSpeaking = false, repLastLoud = 0, activeId = "", dmIds = [];
-  let stripStatusEl = null, stripMeterEl = null, meterRaf = null, lastLevel = 0;
+  let stripStatusEl = null, stripMeterEl = null, meterRaf = null, lastLevel = 0, lastLevelSent = 0;
   const MIC_HELP = "Microphone is blocked for Roll20.\n\nClick the icon at the left of the address bar, set Microphone to Allow, then reload this tab.";
 
   const log = (...a) => console.log("[dnd-overlay]", ...a);
@@ -146,6 +149,28 @@
 
   const setConnected = (ok) => statusEl && statusEl.classList.toggle("connected", ok);
 
+  function livingTick(t) {
+    const now = Date.now();
+    for (const [uid, el] of portraitEls) {
+      const img = el.querySelector("img");
+      if (!img) continue;
+      if (el.classList.contains("active")) {
+        if (now - (levelTime[uid] || 0) > 200) levelTarget[uid] = 0;
+        const target = levelTarget[uid] || 0;
+        const cur = levelCur[uid] = (levelCur[uid] || 0) + (target - (levelCur[uid] || 0)) * 0.3;
+        const breathe = Math.sin(t / 1300) * 0.012;
+        const scale = 1 + breathe + cur * 0.08;
+        const ty = -cur * 6;
+        if (img.style.transition !== "none") img.style.transition = "none";
+        img.style.transform = "scale(" + scale.toFixed(3) + ") translateY(" + ty.toFixed(1) + "px)";
+        img.style.filter = "drop-shadow(0 0 " + (18 + cur * 28).toFixed(0) + "px rgba(255,214,120," + (0.45 + cur * 0.4).toFixed(2) + ")) drop-shadow(0 14px 28px rgba(0,0,0,.55))";
+      } else if (img.style.transform) { img.style.transform = ""; img.style.filter = ""; img.style.transition = ""; }
+    }
+    livingRaf = requestAnimationFrame(livingTick);
+  }
+  function startLiving() { if (livingRaf) cancelAnimationFrame(livingRaf); livingRaf = requestAnimationFrame(livingTick); }
+  function stopLiving() { if (livingRaf) { cancelAnimationFrame(livingRaf); livingRaf = null; } }
+
   async function loadCampaign(base) {
     const res = await fetch(`${base}/campaign.json?room=${encodeURIComponent(room)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`campaign.json HTTP ${res.status}`);
@@ -162,6 +187,7 @@
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type === "speaking") setSpeaking(msg.userId, msg.speaking);
+      else if (msg.type === "level") { levelTarget[msg.userId] = msg.level; levelTime[msg.userId] = Date.now(); }
       else if (msg.type === "snapshot") {
         resetAll();
         if (!paused) for (const id of msg.speaking || []) showSpeaker(id);
@@ -188,6 +214,7 @@
       buildPortraits(base, campaign);
       connectSocket(base);
       initStrip();
+      startLiving();
     } catch (err) {
       log("startup failed:", err.message, "- retrying in 5s");
       setTimeout(() => start(rawBase), 5000);
@@ -196,6 +223,7 @@
 
   function stop() {
     teardown = true;
+    stopLiving();
     teardownDm();
     if (socket) { try { socket.close(); } catch (_) {} socket = null; }
     clearOverlay();
@@ -205,7 +233,7 @@
     rootEl = statusEl = pausedBanner = null;
   }
 
-  // ===== Bottom control strip (players: pick char + mic + pause; DM: board) =====
+  // ===== Bottom control strip = the control center (board + add + mic + pause) =====
   function portraitUrl(c){ return /^https?:\/\//i.test(c.portrait) ? c.portrait : `${relayBase}/portraits/${encodeURIComponent(c.portrait)}?room=${encodeURIComponent(room)}`; }
   function setStripStatus(text, cls, help) {
     if (!stripStatusEl) return;
@@ -215,20 +243,19 @@
   }
   function updateLiveStatus() {
     if (!stripStatusEl) return;
-    if (Object.keys(campaignChars).length === 0) { setStripStatus("Campaign empty or wrong code", "err"); return; }
-    if (!repRunning) {
-      if (!dmMode && !(myChar && campaignChars[myChar])) { setStripStatus("Add your character in the popup", "off"); return; }
-      setStripStatus("Mic off \u2014 click \uD83C\uDFA4 to go live", "off"); return;
-    }
-    if (repSpeaking) { const nm = (campaignChars[activeId] && campaignChars[activeId].name) || activeId; setStripStatus("\uD83D\uDD0A Live as " + nm, "live"); }
-    else setStripStatus("Listening\u2026", "ok");
+    if (!dmMode && boardIds().length === 0) { setStripStatus("Add your character with +", "off"); return; }
+    if (dmMode && boardIds().length === 0) { setStripStatus("Add an NPC with +", "off"); return; }
+    if (!repRunning) { setStripStatus("Mic off — click 🎤", "off"); return; }
+    if (repSpeaking) { const nm = (campaignChars[activeId] && campaignChars[activeId].name) || activeId; setStripStatus("🔊 Live as " + nm, "live"); }
+    else setStripStatus("Listening…", "ok");
   }
   function testFlash() {
-    const id = activeId || (myChar && campaignChars[myChar] ? myChar : (dmIds[0] || ""));
-    if (!id) { setStripStatus("Pick a character first", "err"); return; }
+    const id = activeId || boardIds()[0];
+    if (!id) { setStripStatus("Add a character first", "err"); return; }
     showSpeaker(id); setTimeout(() => hideSpeaker(id), 1800);
   }
   function meterTick() { if (!strip) { meterRaf = null; return; } if (stripMeterEl) stripMeterEl.style.width = ((repRunning ? lastLevel : 0) * 100).toFixed(0) + "%"; meterRaf = requestAnimationFrame(meterTick); }
+
   function repWsUrl() {
     return relayBase.replace(/^http/i, "ws") + "/?role=reporter&room=" + encodeURIComponent(room) +
       (joinPw ? "&join=" + encodeURIComponent(joinPw) : "");
@@ -246,8 +273,6 @@
   function highlightStrip() {
     if (!strip) return;
     strip.querySelectorAll(".dnd-dm-thumb").forEach((t) => t.classList.toggle("active", t.dataset.id === activeId));
-    const sel = strip.querySelector(".dnd-player-sel");
-    if (sel && sel.value !== activeId) sel.value = activeId;
   }
   function setActive(id) {
     if (!id) { activeId = ""; highlightStrip(); return; }
@@ -257,50 +282,46 @@
       reporterSend(id, true);
       repSpeaking = true; repLastLoud = Date.now();
       if (strip) strip.classList.add("speaking");
-    } else {
-      activeId = id;
-    }
+    } else { activeId = id; }
     highlightStrip();
   }
   function mkBtn(cls, txt, title, onclick) { const b = document.createElement("button"); b.className = cls; b.textContent = txt; b.title = title; b.onclick = onclick; return b; }
 
+  function boardIds() {
+    if (dmMode) return Object.keys(campaignChars).filter((id) => (campaignChars[id].kind || "pc") === "npc");
+    return (myCharacterIds || []).filter((id) => campaignChars[id]);
+  }
+  function maxChars() { return dmMode ? DM_MAX : PLAYER_MAX; }
+
+  function makeThumb(id, i) {
+    const c = campaignChars[id];
+    const t = document.createElement("div");
+    t.className = "dnd-dm-thumb"; t.dataset.id = id; t.title = c.name || id;
+    const img = document.createElement("img"); img.src = portraitUrl(c); t.appendChild(img);
+    if (i < 9) { const k = document.createElement("span"); k.className = "dnd-dm-kbd"; k.textContent = i + 1; t.appendChild(k); }
+    const del = document.createElement("span"); del.className = "dnd-dm-del"; del.textContent = "×"; del.title = "Remove";
+    del.onclick = (e) => { e.stopPropagation(); deleteChar(id, c.name); };
+    t.appendChild(del);
+    t.onclick = () => setActive(id);
+    return t;
+  }
+
   function buildStrip() {
     teardownStrip();
-    const allIds = Object.keys(campaignChars);
-    dmIds = dmMode
-      ? allIds.filter((id) => (campaignChars[id].kind || "pc") === "npc")
-      : allIds.filter((id) => (campaignChars[id].kind || "pc") !== "npc");
-    strip = document.createElement("div");
-    strip.id = "dnd-dm-strip";
+    dmIds = boardIds();
+    strip = document.createElement("div"); strip.id = "dnd-dm-strip";
 
+    strip.appendChild(mkBtn("dnd-dm-collapse", collapsed ? "▸" : "◂", "Collapse / expand", toggleCollapse));
     strip.appendChild(mkBtn("dnd-dm-mic", "🎤", "Start/stop your microphone", () => (repRunning ? stopMic() : startMic())));
 
-    if (dmMode) {
-      const thumbs = document.createElement("div");
-      thumbs.className = "dnd-dm-thumbs";
-      dmIds.forEach((id, i) => {
-        const c = campaignChars[id];
-        const t = document.createElement("div");
-        t.className = "dnd-dm-thumb"; t.dataset.id = id; t.title = c.name || id;
-        const img = document.createElement("img"); img.src = portraitUrl(c); t.appendChild(img);
-        if (i < 9) { const k = document.createElement("span"); k.className = "dnd-dm-kbd"; k.textContent = i + 1; t.appendChild(k); }
-        t.onclick = () => setActive(id);
-        thumbs.appendChild(t);
-      });
-      strip.appendChild(thumbs);
-    } else {
-      const lbl = document.createElement("div");
-      lbl.className = "dnd-player-name";
-      if (myChar && campaignChars[myChar]) {
-        lbl.textContent = campaignChars[myChar].name || myChar;
-        activeId = myChar;
-      } else {
-        lbl.textContent = "Add your character in the extension popup";
-        lbl.classList.add("muted");
-        activeId = "";
-      }
-      strip.appendChild(lbl);
+    const thumbs = document.createElement("div"); thumbs.className = "dnd-dm-thumbs";
+    dmIds.forEach((id, i) => thumbs.appendChild(makeThumb(id, i)));
+    if (dmIds.length < maxChars()) {
+      const add = document.createElement("div"); add.className = "dnd-dm-thumb dnd-add-tile"; add.title = "Add a character"; add.textContent = "+";
+      add.onclick = openAddPanel;
+      thumbs.appendChild(add);
     }
+    strip.appendChild(thumbs);
 
     const sens = document.createElement("input");
     sens.type = "range"; sens.min = "1"; sens.max = "40"; sens.value = String(dmSens);
@@ -308,13 +329,66 @@
     sens.oninput = () => { dmSens = parseInt(sens.value, 10) || 6; chrome.storage.local.set({ [SENS_KEY]: dmSens }); };
     strip.appendChild(sens);
 
+    stripStatusEl = document.createElement("div"); stripStatusEl.className = "dnd-strip-status";
+    stripStatusEl.onclick = () => { if (stripStatusEl.dataset.help) alert(MIC_HELP); };
+    const mw = document.createElement("div"); mw.className = "dnd-strip-meter";
+    stripMeterEl = document.createElement("div"); stripMeterEl.className = "dnd-strip-meter-fill"; mw.appendChild(stripMeterEl);
+    strip.appendChild(stripStatusEl); strip.appendChild(mw);
+    strip.appendChild(mkBtn("dnd-strip-test", "Test", "Flash my portrait to check it works", testFlash));
     strip.appendChild(mkBtn("dnd-dm-pause", "⏸", "Pause overlay on my screen (Ctrl+Shift+P)", () => requestTogglePause()));
 
     strip.classList.toggle("paused", paused);
+    strip.classList.toggle("collapsed", collapsed);
     document.documentElement.appendChild(strip);
-    if (dmMode && dmIds.length) setActive(dmIds.indexOf(activeId) >= 0 ? activeId : dmIds[0]);
+    if (dmIds.length) setActive(dmIds.indexOf(activeId) >= 0 ? activeId : dmIds[0]); else activeId = "";
+    if (meterRaf) cancelAnimationFrame(meterRaf);
+    meterTick();
+    updateLiveStatus();
   }
-  function teardownStrip() { if (meterRaf) { cancelAnimationFrame(meterRaf); meterRaf = null; } if (strip) { strip.remove(); strip = null; } stripStatusEl = null; stripMeterEl = null; }
+  function teardownStrip() { if (meterRaf) { cancelAnimationFrame(meterRaf); meterRaf = null; } if (strip) { strip.remove(); strip = null; } stripStatusEl = null; stripMeterEl = null; closeAddPanel(); }
+
+  function toggleCollapse() {
+    collapsed = !collapsed;
+    chrome.storage.local.set({ [COLLAPSE_KEY]: collapsed });
+    if (strip) { strip.classList.toggle("collapsed", collapsed); const c = strip.querySelector(".dnd-dm-collapse"); if (c) c.textContent = collapsed ? "▸" : "◂"; }
+  }
+
+  function refreshCampaign() {
+    loadCampaign(relayBase).then((c) => { campaignChars = (c && c.characters) || {}; buildPortraits(relayBase, c); buildStrip(); }).catch(() => {});
+  }
+
+  function openAddPanel() {
+    closeAddPanel();
+    addPanel = document.createElement("div"); addPanel.id = "dnd-add-panel";
+    const title = document.createElement("div"); title.className = "dnd-add-title"; title.textContent = dmMode ? "Add an NPC" : "Add your character";
+    const name = document.createElement("input"); name.type = "text"; name.placeholder = "Name"; name.className = "dnd-add-name";
+    const file = document.createElement("input"); file.type = "file"; file.accept = "image/*"; file.className = "dnd-add-file";
+    const msg = document.createElement("div"); msg.className = "dnd-add-msg";
+    const btns = document.createElement("div"); btns.className = "dnd-add-btns";
+    btns.appendChild(mkBtn("dnd-add-save", "Save", "", () => doAdd(name, file, msg)));
+    btns.appendChild(mkBtn("dnd-add-cancel", "Cancel", "", closeAddPanel));
+    addPanel.appendChild(title); addPanel.appendChild(name); addPanel.appendChild(file); addPanel.appendChild(btns); addPanel.appendChild(msg);
+    document.documentElement.appendChild(addPanel); name.focus();
+  }
+  function closeAddPanel() { if (addPanel) { addPanel.remove(); addPanel = null; } }
+  function doAdd(nameEl, fileEl, msgEl) {
+    const nm = nameEl.value.trim(), f = fileEl.files[0];
+    if (!nm) { msgEl.textContent = "Enter a name."; return; }
+    if (!f) { msgEl.textContent = "Choose an image."; return; }
+    msgEl.textContent = "Uploading…";
+    const kind = dmMode ? "npc" : "pc";
+    const url = relayBase + "/admin/upload?room=" + encodeURIComponent(room) + "&" + new URLSearchParams({ name: nm, type: f.type || "image/png", kind }) + (joinPw ? "&join=" + encodeURIComponent(joinPw) : "");
+    fetch(url, { method: "POST", body: f }).then((r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t); })).then((j) => {
+      if (!dmMode) { if (!myCharacterIds.includes(j.id)) myCharacterIds.push(j.id); myCharacterIds = myCharacterIds.slice(0, PLAYER_MAX); chrome.storage.local.set({ [MYCHARS_KEY]: myCharacterIds }); }
+      closeAddPanel(); refreshCampaign();
+    }).catch((e) => { msgEl.textContent = "Failed: " + e.message; });
+  }
+  function deleteChar(id, name) {
+    if (!confirm("Remove " + (name || "this character") + "?")) return;
+    fetch(relayBase + "/admin/delete?room=" + encodeURIComponent(room) + "&id=" + encodeURIComponent(id) + (joinPw ? "&join=" + encodeURIComponent(joinPw) : ""), { method: "POST" })
+      .then(() => { if (!dmMode) { myCharacterIds = myCharacterIds.filter((x) => x !== id); chrome.storage.local.set({ [MYCHARS_KEY]: myCharacterIds }); } refreshCampaign(); })
+      .catch(() => {});
+  }
 
   function connectReporter() {
     repWs = new WebSocket(repWsUrl());
@@ -328,15 +402,16 @@
     const level = Math.min(1, Math.sqrt(s / d.length) * 4);
     lastLevel = level;
     const thr = dmSens / 100, now = Date.now();
+    if (now - lastLevelSent > 80 && repWs && repWs.readyState === 1 && activeId) {
+      lastLevelSent = now;
+      repWs.send(JSON.stringify({ type: "level", userId: activeId, level: Math.round(level * 100) / 100 }));
+    }
     if (level > thr) { repLastLoud = now; if (!repSpeaking) setRepSpeaking(true); }
     else if (repSpeaking && now - repLastLoud > dmHold) setRepSpeaking(false);
   }
   function startMic() {
-    if (!dmMode && !activeId) {
-      const sel = strip && strip.querySelector(".dnd-player-sel");
-      if (sel && sel.value) activeId = sel.value;
-      if (!activeId) { if (sel) sel.focus(); log("pick your character first"); return; }
-    }
+    if (!activeId) { const b = boardIds(); if (b.length) activeId = b[0]; }
+    if (!activeId) { setStripStatus("Add a character with + first", "err"); return; }
     navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
       .then((st) => {
         repStream = st;
@@ -350,7 +425,7 @@
         if (strip) strip.classList.add("mic-on");
         updateLiveStatus();
         log("mic on");
-      }).catch((e) => { setStripStatus("\uD83C\uDFA4 Mic blocked \u2014 click to fix", "err", true); log("mic denied:", e.message); });
+      }).catch((e) => { setStripStatus("🎤 Mic blocked — click to fix", "err", true); log("mic denied:", e.message); });
   }
   function stopMic() {
     repRunning = false; setRepSpeaking(false);
@@ -365,25 +440,26 @@
   function initStrip() { buildStrip(); }
   function teardownDm() { stopMic(); teardownStrip(); }
 
-  // hotkeys 1-9 (DM only, ignored while typing in a Roll20 field)
   document.addEventListener("keydown", (e) => {
     if (!dmMode || !strip) return;
     const t = e.target;
     if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
     const n = parseInt(e.key, 10);
     if (n >= 1 && n <= 9 && dmIds[n - 1]) setActive(dmIds[n - 1]);
-  });  // Pause toggle from the keyboard command / popup (via background.js).
+  });
+  // Pause toggle from the keyboard command / popup (via background.js).
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === "toggle-pause") requestTogglePause();
   });
 
-  chrome.storage.local.get([STORAGE_KEY, ROOM_KEY, DM_KEY, JOIN_KEY, SENS_KEY, HOLD_KEY, MYCHAR_KEY], (data) => {
+  chrome.storage.local.get([STORAGE_KEY, ROOM_KEY, DM_KEY, JOIN_KEY, SENS_KEY, HOLD_KEY, MYCHAR_KEY, MYCHARS_KEY, COLLAPSE_KEY], (data) => {
     room = (data[ROOM_KEY] || "DEFAULT").toUpperCase();
     dmMode = !!data[DM_KEY];
     joinPw = data[JOIN_KEY] || "";
     dmSens = data[SENS_KEY] || 6;
     dmHold = data[HOLD_KEY] || 1200;
-    myChar = data[MYCHAR_KEY] || "";
+    myCharacterIds = Array.isArray(data[MYCHARS_KEY]) ? data[MYCHARS_KEY] : (data[MYCHAR_KEY] ? [data[MYCHAR_KEY]] : []);
+    collapsed = !!data[COLLAPSE_KEY];
     start(data[STORAGE_KEY] || DEFAULT_RELAY_URL);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -392,8 +468,8 @@
     if (changes[DM_KEY]) dmMode = !!changes[DM_KEY].newValue;
     if (changes[JOIN_KEY]) joinPw = changes[JOIN_KEY].newValue || "";
     if (changes[SENS_KEY]) dmSens = changes[SENS_KEY].newValue || 6;
-    if (changes[MYCHAR_KEY]) myChar = changes[MYCHAR_KEY].newValue || "";
-    if (changes[STORAGE_KEY] || changes[ROOM_KEY] || changes[DM_KEY] || changes[JOIN_KEY] || changes[MYCHAR_KEY]) {
+    if (changes[MYCHARS_KEY]) myCharacterIds = Array.isArray(changes[MYCHARS_KEY].newValue) ? changes[MYCHARS_KEY].newValue : [];
+    if (changes[STORAGE_KEY] || changes[ROOM_KEY] || changes[DM_KEY] || changes[JOIN_KEY]) {
       log("settings changed, restarting overlay");
       chrome.storage.local.get(STORAGE_KEY, (d) => { stop(); start(d[STORAGE_KEY] || DEFAULT_RELAY_URL); });
     }

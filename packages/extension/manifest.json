@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "D&D Voice Overlay for Roll20",
-  "version": "1.8.0",
+  "version": "1.10.0",
   "description": "Character portraits light up visual-novel style over Roll20 when a player speaks in Discord voice. No webcams, no setup for players.",
   "permissions": [
     "storage",

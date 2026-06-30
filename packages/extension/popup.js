@@ -1,24 +1,28 @@
 const DEFAULT_RELAY_URL = "https://extension-dnd.onrender.com";
 const $ = (id) => document.getElementById(id);
 const enc = encodeURIComponent;
-let base = DEFAULT_RELAY_URL, code = "", joinPw = "", myChar = "";
+let base = DEFAULT_RELAY_URL, code = "", joinPw = "", isDm = false;
 
 function normalize(raw){ let b=(raw||"").trim().replace(/\/+$/,""); if(b&&!/^https?:\/\//i.test(b))b="http://"+b; return b; }
 function relay(){ return normalize($("url").value) || DEFAULT_RELAY_URL; }
 function curCode(){ return ($("code").value||"").trim().toUpperCase(); }
 function setStatus(el,msg,ok){ el.textContent=msg; el.className=(el.id==="status"?"":"msg ")+(ok?"ok":"bad"); }
-function applyRole(){ const dm=$("dm").checked; $("playerCard").style.display=dm?"none":"block"; $("dmCard").style.display=dm?"block":"none"; if(dm)renderCode(); }
 
+function applyView(){
+  $("playerView").style.display = isDm ? "none" : "block";
+  $("dmView").style.display = isDm ? "block" : "none";
+  $("topStep").textContent = isDm ? "1 · Your campaign" : "1 · Join your game";
+  $("codeLbl").textContent = isDm ? "Your campaign code" : "Campaign code (ask your DM)";
+  if (isDm) renderCode();
+}
 function showWelcome(){ $("welcome").style.display="block"; $("main").style.display="none"; }
-function showMain(isDm){ $("welcome").style.display="none"; $("main").style.display="block"; $("dm").checked=!!isDm; applyRole(); if(isDm){ if(!curCode())$("createWrap").open=true; } else { renderMyChar(); $("code").focus(); } }
+function showMain(dm){ isDm=!!dm; $("welcome").style.display="none"; $("main").style.display="block"; applyView(); if(isDm && !curCode()) $("createWrap").open=true; else if(!isDm) $("code").focus(); }
 
 function load(){
   chrome.storage.local.get(["relayBaseUrl","campaignCode","joinPw","dmMode","myCharacterId"],(d)=>{
-    base = d.relayBaseUrl || DEFAULT_RELAY_URL;
-    code = (d.campaignCode||"").toUpperCase();
-    joinPw = d.joinPw || ""; myChar = d.myCharacterId || "";
-    $("url").value = base; $("code").value = code; $("join").value = joinPw; $("dm").checked = !!d.dmMode;
-    if (code) { showMain(!!d.dmMode); } else { showWelcome(); }
+    base=d.relayBaseUrl||DEFAULT_RELAY_URL; code=(d.campaignCode||"").toUpperCase(); joinPw=d.joinPw||"";
+    $("url").value=base; $("code").value=code; $("join").value=joinPw;
+    if(code) showMain(!!d.dmMode); else showWelcome();
   });
 }
 
@@ -28,51 +32,9 @@ $("back").onclick=showWelcome;
 
 function renderCode(){
   const box=$("codeDisplay"); code=curCode();
-  if(!code){ box.innerHTML='<div class="hint">No campaign yet — create one below, or enter a code above.</div>'; return; }
-  box.innerHTML='<div class="hint" style="margin:0 0 4px">Share this code with your players:</div><div class="codebox"><span>'+code+'</span><button id="copyCode">Copy</button></div>';
+  if(!code){ box.innerHTML='<div class="hint" style="margin:0">No campaign yet — create one below.</div>'; return; }
+  box.innerHTML='<div class="hint" style="margin:0 0 4px">Send this code to your players:</div><div class="codebox"><span>'+code+'</span><button id="copyCode">Copy</button></div>';
   $("copyCode").onclick=()=>{ try{navigator.clipboard.writeText(code);}catch(e){} $("copyCode").textContent="Copied!"; setTimeout(()=>{$("copyCode").textContent="Copy";},1200); };
-}
-
-function renderMyChar(){
-  const box=$("myCharBox"); code=curCode();
-  if(!code){ box.innerHTML='<div class="hint">Enter your campaign code above first.</div>'; return; }
-  fetch(relay()+"/campaign.json?room="+enc(code),{cache:"no-store"}).then(r=>r.json()).then(c=>{
-    const chars=(c&&c.characters)||{};
-    if(myChar && chars[myChar]){
-      const ch=chars[myChar];
-      const src=/^https?:\/\//i.test(ch.portrait)?ch.portrait:relay()+"/portraits/"+enc(ch.portrait)+"?room="+enc(code);
-      box.innerHTML="";
-      const w=document.createElement("div"); w.className="mychar";
-      const img=document.createElement("img"); img.src=src;
-      const nm=document.createElement("div"); nm.className="nm"; nm.textContent=ch.name||myChar;
-      const del=document.createElement("button"); del.className="danger"; del.style.flex="0 0 auto"; del.textContent="Remove"; del.onclick=removeMyChar;
-      w.appendChild(img); w.appendChild(nm); w.appendChild(del); box.appendChild(w);
-    } else { if(myChar){ myChar=""; chrome.storage.local.set({myCharacterId:""}); } box.innerHTML='<div class="hint">No character yet — add yours below.</div>'; }
-  }).catch(()=>{ box.innerHTML=""; });
-}
-
-$("pcFile").onchange=(e)=>{ const f=e.target.files[0]; if(f){ $("pcPrev").src=URL.createObjectURL(f); $("pcPrev").style.display="block"; } };
-
-$("pcSave").onclick=()=>{
-  const name=$("pcName").value.trim(), f=$("pcFile").files[0], m=$("pcMsg"); code=curCode(); joinPw=$("join").value||"";
-  if(!code) return setStatus(m,"Enter your campaign code first.",false);
-  if(!name) return setStatus(m,"Enter your character name.",false);
-  if(!f) return setStatus(m,"Choose a portrait image.",false);
-  setStatus(m,"Uploading...",true);
-  chrome.storage.local.set({campaignCode:code,joinPw});
-  const url=relay()+"/admin/upload?room="+enc(code)+"&"+new URLSearchParams({name,type:f.type||"image/png",kind:"pc"})+(joinPw?"&join="+enc(joinPw):"");
-  fetch(url,{method:"POST",body:f}).then(r=>r.ok?r.json():r.text().then(t=>{throw new Error(t);})).then(j=>{
-    const oldId=myChar; myChar=j.id; chrome.storage.local.set({myCharacterId:myChar});
-    if(oldId && oldId!==myChar) fetch(relay()+"/admin/delete?room="+enc(code)+"&id="+enc(oldId)+(joinPw?"&join="+enc(joinPw):""),{method:"POST"}).catch(()=>{});
-    setStatus(m,"✓ Saved your character.",true);
-    $("pcName").value=""; $("pcFile").value=""; $("pcPrev").style.display="none"; renderMyChar();
-  }).catch(e=>setStatus(m,"Failed: "+e.message,false));
-};
-
-function removeMyChar(){
-  code=curCode(); joinPw=$("join").value||""; if(!myChar||!code) return;
-  fetch(relay()+"/admin/delete?room="+enc(code)+"&id="+enc(myChar)+(joinPw?"&join="+enc(joinPw):""),{method:"POST"})
-    .then(()=>{ myChar=""; chrome.storage.local.set({myCharacterId:""}); renderMyChar(); }).catch(()=>{});
 }
 
 $("dmCreate").onclick=()=>{
@@ -81,19 +43,15 @@ $("dmCreate").onclick=()=>{
   setStatus(m,"Creating...",true);
   const prm={name}; if(jp)prm.joinpw=jp;
   fetch(relay()+"/create?"+new URLSearchParams(prm),{method:"POST"}).then(r=>r.ok?r.json():r.text().then(t=>{throw new Error(t);})).then(j=>{
-    code=j.room; joinPw=jp||"";
-    chrome.storage.local.set({campaignCode:code,joinPw,dmMode:true});
-    $("code").value=code; $("join").value=joinPw;
-    setStatus(m,"✓ Campaign "+code+" created.",true); $("createWrap").open=false; renderCode();
+    code=j.room; joinPw=jp||""; chrome.storage.local.set({campaignCode:code,joinPw,dmMode:true});
+    $("code").value=code; $("join").value=joinPw; setStatus(m,"✓ Campaign created.",true); $("createWrap").open=false; renderCode();
   }).catch(e=>setStatus(m,"Failed: "+e.message,false));
 };
 
-$("dm").onchange=applyRole;
 $("save").onclick=()=>{
   const b=relay(); code=curCode(); joinPw=$("join").value||"";
-  chrome.storage.local.set({relayBaseUrl:b,campaignCode:code,joinPw,dmMode:$("dm").checked},()=>{
-    base=b; setStatus($("status"),code?("Saved. Campaign "+code+($("dm").checked?" (DM)":"")):"Saved.",true);
-    if($("dm").checked)renderCode(); else renderMyChar();
+  chrome.storage.local.set({relayBaseUrl:b,campaignCode:code,joinPw,dmMode:isDm},()=>{
+    base=b; setStatus($("status"),code?("Saved. Campaign "+code):"Saved.",true); applyView();
   });
 };
 $("test").onclick=()=>{ setStatus($("status"),"Testing...",true); fetch(relay()+"/health",{cache:"no-store"}).then(r=>r.json()).then(j=>setStatus($("status"),"Relay OK ("+(j.mode||"ok")+").",true)).catch(()=>setStatus($("status"),"Could not reach relay.",false)); };

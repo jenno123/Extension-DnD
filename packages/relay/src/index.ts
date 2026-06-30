@@ -226,14 +226,20 @@ const server = http.createServer(async (req, res) => {
 
 // ---- WebSocket -------------------------------------------------------------
 const wss = new WebSocketServer({ server });
-function broadcast(room: Room, msg: SpeakingMessage) {
+function broadcast(room: Room, msg: unknown) {
   const data = JSON.stringify(msg);
   for (const ws of room.displays) if (ws.readyState === WebSocket.OPEN) ws.send(data);
 }
 function onSpeaking(room: Room, buf: RawData) {
-  let msg: SpeakingMessage;
+  let msg: any;
   try { msg = JSON.parse(buf.toString()); } catch { return; }
-  if (msg.type !== "speaking" || typeof msg.userId !== "string") return;
+  if (typeof msg.userId !== "string") return;
+  if (msg.type === "level") {
+    const lvl = Math.max(0, Math.min(1, Number(msg.level) || 0));
+    broadcast(room, { type: "level", userId: msg.userId, level: lvl, ts: Date.now() });
+    return;
+  }
+  if (msg.type !== "speaking") return;
   if (msg.speaking) room.speaking.add(msg.userId); else room.speaking.delete(msg.userId);
   broadcast(room, { type: "speaking", userId: msg.userId, speaking: !!msg.speaking, ts: Date.now() });
 }
